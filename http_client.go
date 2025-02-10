@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"math/rand"
 	"net/http"
@@ -43,6 +44,9 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 
 	var lastErr error
 	originalCtx := req.Context()
+
+	reqID := uuid.New().String()
+	originalCtx = context.WithValue(originalCtx, "req-ID", reqID)
 
 	if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 		var modelsToTry []string
@@ -116,20 +120,32 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
 			timeout = t
 		}
-
-		healthy, _err := c.metricsTracker.checkModelHealth(modelFull, c.config)
-		if _err != nil {
-			errorLog("Error checking model health:", _err)
+		// Retrieve the value from the context.
+		val := originalCtx.Value("req-ID")
+		if val == nil {
+			fmt.Println("No request ID found in context")
 		}
-		if !healthy {
-			lastErr = fmt.Errorf("model %s is unhealthy (average latency too high)", modelFull)
-			errorLog(lastErr)
-			// Do not retry further; return error to trigger fallback.
-			return nil, lastErr
+		reqID, ok := val.(string)
+		if !ok {
+			fmt.Println("Request ID is not a string")
 		}
 
 		ctx, cancel := context.WithTimeout(originalCtx, time.Duration(timeout*float64(time.Second)))
 		defer cancel()
+
+		healthy, _err := c.metricsTracker.checkModelHealth(reqID, modelFull, "Request Failed From Host", c.config)
+		if _err != nil {
+			errorLog("Error checking model health:", _err)
+		}
+		if !healthy {
+			cancel()
+			lastErr = _err
+			errorLog("model %s is unhealthy (average latency too high)", modelFull)
+			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
+				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
+			}
+			continue
+		}
 
 		startTime := time.Now()
 		var resp *http.Response
@@ -145,16 +161,17 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		}
 
 		elapsed := time.Since(startTime).Seconds()
-		// Record the latency in SQLite.
-		recErr := c.metricsTracker.recordLatency(modelFull, elapsed)
-		if recErr != nil {
-			errorLog("Error recording latency:", recErr)
-		}
 
 		if err != nil {
 			cancel()
 			lastErr = err
 			errorLog("❌ Request failed ", lastErr)
+			// Record the latency in SQLite.
+			recErr := c.metricsTracker.recordLatency(reqID, modelFull, elapsed, "Request Failed")
+			if recErr != nil {
+				errorLog("Error recording latency:", recErr)
+			}
+
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
 			}
@@ -176,6 +193,12 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 			lastStatusCode = resp.StatusCode
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				// Record the latency in SQLite.
+				recErr := c.metricsTracker.recordLatency(reqID, modelFull, elapsed, "request success")
+				if recErr != nil {
+					errorLog("Error recording latency:", recErr)
+				}
+
 				return &http.Response{
 					Status:     resp.Status,
 					StatusCode: resp.StatusCode,
@@ -204,6 +227,12 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					string(body))
 			}
 			errorLog("❌ Request failed ", lastErr)
+			// Record the latency in SQLite.
+			recErr := c.metricsTracker.recordLatency(reqID, modelFull, elapsed, "Request Failed From Host")
+			if recErr != nil {
+				errorLog("Error recording latency:", recErr)
+			}
+
 		}
 
 		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
@@ -214,7 +243,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 	return nil, lastErr
 }
 
-func getWeightedModelsList(weights map[string]float64) []string {
+func getWeightedModelsList(weights WeightedModels) []string {
 	// Create a slice to store models with their cumulative weights
 	type weightedModel struct {
 		model            string

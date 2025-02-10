@@ -3,6 +3,7 @@ module github.com/Not-Diamond/go-notdiamond
 go 1.21
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/mr-tron/base58 v1.2.0
 	github.com/pkg/errors v0.9.1

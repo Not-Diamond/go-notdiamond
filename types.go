@@ -32,8 +32,7 @@ type RollingAverageLatency struct {
 	RecoveryTime        time.Duration
 }
 
-type ModelLatency map[string]RollingAverageLatency
-
+type ModelLatency map[string]*RollingAverageLatency
 type Config struct {
 	Clients         []http.Request
 	Models          models
