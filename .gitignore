@@ -1,0 +1,62 @@
+# Environment variables and IDE files
+**/.env
+**/.env.local
+**/.env.development.local
+**/.env.test.local
+**/.env.production.local
+**/.env.development
+**/.env.test
+.vscode/
+.idea/
+
+# Go
+**/coverage.out
+**/coverage.html
+**/coverage.json
+**/coverage.out.html
+**/coverage.out.json
+**/coverage.out.txt
+**/coverage.out.xml
+coverage.txt
+
+# Go specific
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/vendor/
+
+# OS specific
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Debug files
+__debug_bin
+debug.test
+
+# IDE specific (expanding on your existing entries)
+*.sublime-workspace
+*.sublime-project
+.settings/
+.project
+.classpath
+*.iml
+.fleet/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+/tmp/
+
+# Air (if you're using it for hot reload)
+/tmp/
+.air.toml
+
+*.db
