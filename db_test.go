@@ -44,7 +44,7 @@ func TestMakeTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 
@@ -101,7 +101,7 @@ func TestSetGetDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 
@@ -142,7 +142,7 @@ func TestDump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 
@@ -203,7 +203,7 @@ func TestDrop(t *testing.T) {
 	}
 	// Verify that the file no longer exists.
 	if _, err := os.Stat(dbFile); !os.IsNotExist(err) {
-		t.Errorf("Database file still exists after dropDB()")
+		t.Errorf("database file still exists after dropDB()")
 	}
 }
 
@@ -213,7 +213,7 @@ func TestQueryExec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 
@@ -260,7 +260,7 @@ func TestInvalidQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 
@@ -282,7 +282,7 @@ func TestConcurrentOpen(t *testing.T) {
 		t.Fatalf("openDB() db1 failed: %v", err)
 	}
 	// Do not close db1 immediately so that it holds the lock.
-	var db2 *Database
+	var db2 *database
 	var err2 error
 	done := make(chan struct{})
 	go func() {
@@ -336,7 +336,7 @@ func TestDebug(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 
@@ -352,7 +352,7 @@ func TestGetNonexistentKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openDB() failed: %v", err)
 	}
-	defer func(db *Database) {
+	defer func(db *database) {
 		err := db.closeConnection()
 		if err != nil {
 

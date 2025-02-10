@@ -24,32 +24,32 @@ import (
 // It should be set to an absolute path in production.
 var DataFolder = "."
 
-// Database represents a SQLite database instance.
-type Database struct {
+// database represents a SQLite database instance.
+type database struct {
 	Schema   string  // Full file path to the SQLite database.
 	db       *sql.DB // Underlying database connection.
 	logger   *logrus.Logger
 	isClosed bool
 }
 
-// DatabaseLock is used to prevent concurrent access to the same database file.
-type DatabaseLock struct {
+// databaseLock is used to prevent concurrent access to the same database file.
+type databaseLock struct {
 	Locked map[string]bool
 	sync.RWMutex
 }
 
-var databaseLock *DatabaseLock
+var dbLock *databaseLock
 
 func init() {
 	// Initialize the database lock map.
-	databaseLock = &DatabaseLock{
+	dbLock = &databaseLock{
 		Locked: make(map[string]bool),
 	}
 }
 
 // makeTables creates a table with the given name and columns.
 // If timeSeries is true, an auto-increment primary key and a timestamp column are added.
-func (d *Database) makeTables(timeSeries bool, tableName string, columns map[string]string) error {
+func (d *database) makeTables(timeSeries bool, tableName string, columns map[string]string) error {
 	var sqlStmt string
 	if timeSeries {
 		sqlStmt = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -86,7 +86,7 @@ func (d *Database) makeTables(timeSeries bool, tableName string, columns map[str
 }
 
 // getColumns returns the list of column names for the specified table.
-func (d *Database) getColumns(table string) ([]string, error) {
+func (d *database) getColumns(table string) ([]string, error) {
 	rows, err := d.db.Query(fmt.Sprintf("SELECT * FROM %s LIMIT 1", table))
 	if err != nil {
 		return nil, errors.Wrap(err, "getColumns executeQuery")
@@ -107,7 +107,7 @@ func (d *Database) getColumns(table string) ([]string, error) {
 
 // getJSON retrieves the JSON value associated with the specified key from the table,
 // unmarshalling it into the provided interface.
-func (d *Database) getJSON(tableName, key string, v interface{}) error {
+func (d *database) getJSON(tableName, key string, v interface{}) error {
 	query := fmt.Sprintf("SELECT value FROM %s WHERE key = ?", tableName)
 	stmt, err := d.db.Prepare(query)
 	if err != nil {
@@ -133,7 +133,7 @@ func (d *Database) getJSON(tableName, key string, v interface{}) error {
 
 // setJSON inserts or updates the given key-value pair in the specified table.
 // The value is stored as a JSON string.
-func (d *Database) setJSON(tableName, key string, value interface{}) error {
+func (d *database) setJSON(tableName, key string, value interface{}) error {
 	b, err := json.Marshal(value)
 	if err != nil {
 		return errors.Wrap(err, "setJSON Marshal")
@@ -172,7 +172,7 @@ func (d *Database) setJSON(tableName, key string, value interface{}) error {
 }
 
 // deleteItem removes the record identified by key from the specified table.
-func (d *Database) deleteItem(tableName, key string) error {
+func (d *database) deleteItem(tableName, key string) error {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return errors.Wrap(err, "deleteItem Begin")
@@ -206,7 +206,7 @@ func (d *Database) deleteItem(tableName, key string) error {
 }
 
 // dumpDB outputs a complete SQL dump of the database.
-func (d *Database) dumpDB() (string, error) {
+func (d *database) dumpDB() (string, error) {
 	var buf bytes.Buffer
 	writer := bufio.NewWriter(&buf)
 	if err := sqlite3dump.Dump(d.Schema, writer); err != nil {
@@ -230,7 +230,7 @@ func entryExists(name string) error {
 }
 
 // dropDB closes and removes the underlying database file.
-func (d *Database) dropDB() error {
+func (d *database) dropDB() error {
 	if err := d.closeConnection(); err != nil {
 		return errors.Wrap(err, "dropDB closeConnection")
 	}
@@ -243,9 +243,9 @@ func (d *Database) dropDB() error {
 
 // openDB opens a SQLite3 database with the specified name.
 // If readOnly is false, the database file is created (using a base58 encoded name) if it does not exist.
-func openDB(name string, readOnly bool) (*Database, error) {
+func openDB(name string, readOnly bool) (*database, error) {
 	name = strings.TrimSpace(name)
-	d := &Database{
+	d := &database{
 		Schema: name,
 		logger: Log, // Ensure your logger provides this constructor.
 	}
@@ -267,13 +267,13 @@ func openDB(name string, readOnly bool) (*Database, error) {
 
 	// Acquire a lock for the database file.
 	for {
-		databaseLock.Lock()
-		if _, locked := databaseLock.Locked[d.Schema]; !locked {
-			databaseLock.Locked[d.Schema] = true
-			databaseLock.Unlock()
+		dbLock.Lock()
+		if _, locked := dbLock.Locked[d.Schema]; !locked {
+			dbLock.Locked[d.Schema] = true
+			dbLock.Unlock()
 			break
 		}
-		databaseLock.Unlock()
+		dbLock.Unlock()
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -296,7 +296,7 @@ func openDB(name string, readOnly bool) (*Database, error) {
 }
 
 // debugDB sets the logger's level based on the debugMode flag.
-func (d *Database) debugDB(debugMode bool) {
+func (d *database) debugDB(debugMode bool) {
 	if debugMode {
 		setLevel("debug")
 	} else {
@@ -305,7 +305,7 @@ func (d *Database) debugDB(debugMode bool) {
 }
 
 // closeConnection terminates the database connection and releases the file lock.
-func (d *Database) closeConnection() error {
+func (d *database) closeConnection() error {
 	if d.isClosed {
 		return nil
 	}
@@ -313,15 +313,15 @@ func (d *Database) closeConnection() error {
 		errorLog(err)
 		return errors.Wrap(err, "closeConnection db.closeConnection")
 	}
-	databaseLock.Lock()
-	delete(databaseLock.Locked, d.Schema)
-	databaseLock.Unlock()
+	dbLock.Lock()
+	delete(dbLock.Locked, d.Schema)
+	dbLock.Unlock()
 	d.isClosed = true
 	return nil
 }
 
 // executeQuery executes a query that returns rows (e.g. SELECT).
-func (d *Database) executeQuery(query string, args ...interface{}) (*sql.Rows, error) {
+func (d *database) executeQuery(query string, args ...interface{}) (*sql.Rows, error) {
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, "executeQuery")
@@ -330,7 +330,7 @@ func (d *Database) executeQuery(query string, args ...interface{}) (*sql.Rows, e
 }
 
 // execQuery executes a query without returning rows (e.g. INSERT, UPDATE, DELETE).
-func (d *Database) execQuery(query string, args ...interface{}) error {
+func (d *database) execQuery(query string, args ...interface{}) error {
 	if _, err := d.db.Exec(query, args...); err != nil {
 		return errors.Wrap(err, "execQuery")
 	}

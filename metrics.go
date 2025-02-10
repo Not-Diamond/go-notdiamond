@@ -5,14 +5,14 @@ import (
 	"time"
 )
 
-// MetricsTracker manages a SQLite database that records call latencies per model.
-type MetricsTracker struct {
-	db *Database
+// metricsTracker manages a SQLite database that records call latencies per model.
+type metricsTracker struct {
+	db *database
 }
 
-// NewMetricsTracker initializes the SQLite database (stored in the file given by dbPath)
+// newMetricsTracker initializes the SQLite database (stored in the file given by dbPath)
 // and creates the table if needed.
-func NewMetricsTracker(dbPath string) (*MetricsTracker, error) {
+func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 	db, err := openDB(dbPath, false)
 	if err != nil {
 		return nil, err
@@ -27,20 +27,20 @@ func NewMetricsTracker(dbPath string) (*MetricsTracker, error) {
 		return nil, err
 	}
 
-	return &MetricsTracker{db: db}, nil
+	return &metricsTracker{db: db}, nil
 }
 
-// RecordLatency records a call's latency for a given model.
-func (mt *MetricsTracker) RecordLatency(model string, latency float64) error {
+// recordLatency records a call's latency for a given model.
+func (mt *metricsTracker) recordLatency(model string, latency float64) error {
 	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)",
 		time.Now().UTC(), model, latency)
 	return err
 }
 
-// CheckModelHealth returns true if the model is healthy (i.e. its average latency over the last
+// checkModelHealth returns true if the model is healthy (i.e. its average latency over the last
 // noOfCalls does not exceed avgLatency threshold). If the model is unhealthy, it is considered “blacklisted”
 // until recoveryTime has elapsed since the last call that exceeded the threshold.
-func (mt *MetricsTracker) CheckModelHealth(model string, config *Config) (bool, error) {
+func (mt *metricsTracker) checkModelHealth(model string, config *Config) (bool, error) {
 	if config.NoOfCalls > 10 {
 		config.NoOfCalls = 10 // Enforce maximum
 	}
@@ -109,12 +109,12 @@ func (mt *MetricsTracker) CheckModelHealth(model string, config *Config) (bool, 
 	return true, nil
 }
 
-// Close closes the underlying database connection.
-func (mt *MetricsTracker) Close() error {
+// close closes the underlying database connection.
+func (mt *metricsTracker) close() error {
 	return mt.db.closeConnection()
 }
 
-// Drop closes the underlying database connection.
-func (mt *MetricsTracker) Drop() error {
+// drop closes the underlying database connection.
+func (mt *metricsTracker) drop() error {
 	return mt.db.dropDB()
 }

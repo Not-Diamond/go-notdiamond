@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-type Models interface {
+type models interface {
 	isModels()
 }
 
@@ -19,16 +19,16 @@ type WeightedModels map[string]float64
 
 func (WeightedModels) isModels() {}
 
-type ClientType string
+type clientType string
 
 const (
-	ClientTypeAzure  ClientType = "azure"
-	ClientTypeOpenAI ClientType = "openai"
+	ClientTypeAzure  clientType = "azure"
+	ClientTypeOpenAI clientType = "openai"
 )
 
 type Config struct {
 	Clients             []http.Request
-	Models              Models
+	Models              models
 	MaxRetries          map[string]int
 	Timeout             map[string]float64
 	ModelMessages       map[string][]Message

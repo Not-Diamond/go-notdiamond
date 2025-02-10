@@ -109,7 +109,7 @@ func TestInit(t *testing.T) {
 
 			// If the client was successfully created, make sure to clean up its resources.
 			if client != nil && client.HttpClient != nil && client.HttpClient.metricsTracker != nil {
-				if cerr := client.HttpClient.metricsTracker.Close(); cerr != nil {
+				if cerr := client.HttpClient.metricsTracker.close(); cerr != nil {
 					t.Errorf("failed to close metrics tracker: %v", cerr)
 				}
 			}

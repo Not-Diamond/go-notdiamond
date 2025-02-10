@@ -12,16 +12,16 @@ import (
 func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 
 	model := "openai/gpt-4o"
-	metrics, err := NewMetricsTracker(":memory:" + t.Name())
+	metrics, err := newMetricsTracker(":memory:" + t.Name())
 	if err != nil {
 		log.Fatalf("Failed to open database connection: %v", err)
 	}
 	// Record several latencies. For example, 1, 2, 3, and 4 seconds.
 	latencies := []float64{1.0, 2.0, 3.0, 4.0} // average = 2.5 seconds
 	for _, l := range latencies {
-		err := metrics.RecordLatency(model, l)
+		err := metrics.recordLatency(model, l)
 		if err != nil {
-			t.Errorf("RecordLatency error: %v", err)
+			t.Errorf("recordLatency error: %v", err)
 		}
 	}
 
@@ -32,9 +32,9 @@ func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 		AvgLatencyThreshold: 3.0,
 	}
 
-	healthy, err := metrics.CheckModelHealth(model, config)
+	healthy, err := metrics.checkModelHealth(model, config)
 	if err != nil {
-		t.Errorf("CheckModelHealth error: %v", err)
+		t.Errorf("checkModelHealth error: %v", err)
 	}
 	if !healthy {
 		t.Errorf("Expected model %q to be healthy (avg=2.5 < threshold=3.0)", model)
@@ -43,9 +43,9 @@ func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 	// Record two high latency calls (e.g. 10 seconds each), which should push the average above the threshold.
 	highLatencies := []float64{10.0, 10.0}
 	for _, l := range highLatencies {
-		err := metrics.RecordLatency(model, l)
+		err := metrics.recordLatency(model, l)
 		if err != nil {
-			t.Errorf("RecordLatency error: %v", err)
+			t.Errorf("recordLatency error: %v", err)
 		}
 	}
 
@@ -55,9 +55,9 @@ func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 		RecoveryTime:        10 * time.Minute,
 		AvgLatencyThreshold: 3.0,
 	}
-	healthy, err = metrics.CheckModelHealth(model, config)
+	healthy, err = metrics.checkModelHealth(model, config)
 	if err != nil {
-		t.Errorf("CheckModelHealth error: %v", err)
+		t.Errorf("checkModelHealth error: %v", err)
 	}
 
 	if healthy {
@@ -71,12 +71,12 @@ func TestNewMetricsTracker(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_new")
+	mt, err := newMetricsTracker("test_metrics_new")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
@@ -102,24 +102,24 @@ func TestNewMetricsTracker(t *testing.T) {
 	}
 }
 
-// TestRecordLatency verifies that RecordLatency inserts a record into the model_metrics table.
+// TestRecordLatency verifies that recordLatency inserts a record into the model_metrics table.
 func TestRecordLatency(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_record")
+	mt, err := newMetricsTracker("test_metrics_record")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
 	}(mt)
 
-	if err := mt.RecordLatency("model_record", 123.45); err != nil {
-		t.Fatalf("RecordLatency() failed: %v", err)
+	if err := mt.recordLatency("model_record", 123.45); err != nil {
+		t.Fatalf("recordLatency() failed: %v", err)
 	}
 
 	// executeQuery the table to verify a record exists.
@@ -143,17 +143,17 @@ func TestRecordLatency(t *testing.T) {
 	}
 }
 
-// TestCheckModelHealth_NoRecords verifies that CheckModelHealth returns healthy when no records exist.
+// TestCheckModelHealth_NoRecords verifies that checkModelHealth returns healthy when no records exist.
 func TestCheckModelHealth_NoRecords(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_no_records")
+	mt, err := newMetricsTracker("test_metrics_no_records")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
@@ -164,9 +164,9 @@ func TestCheckModelHealth_NoRecords(t *testing.T) {
 		NoOfCalls:           5,
 		RecoveryTime:        time.Minute,
 	}
-	healthy, err := mt.CheckModelHealth("nonexistent_model", config)
+	healthy, err := mt.checkModelHealth("nonexistent_model", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if !healthy {
 		t.Errorf("Expected model to be healthy when no records exist")
@@ -178,24 +178,24 @@ func TestCheckModelHealth_UnderThreshold(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_under")
+	mt, err := newMetricsTracker("test_metrics_under")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
 	}(mt)
 
 	// Insert two records with low latency.
-	if err := mt.RecordLatency("model_under", 50); err != nil {
-		t.Fatalf("RecordLatency() failed: %v", err)
+	if err := mt.recordLatency("model_under", 50); err != nil {
+		t.Fatalf("recordLatency() failed: %v", err)
 	}
 	time.Sleep(10 * time.Millisecond) // Ensure distinct timestamps.
-	if err := mt.RecordLatency("model_under", 50); err != nil {
-		t.Fatalf("RecordLatency() failed: %v", err)
+	if err := mt.recordLatency("model_under", 50); err != nil {
+		t.Fatalf("recordLatency() failed: %v", err)
 	}
 
 	config := &Config{
@@ -203,9 +203,9 @@ func TestCheckModelHealth_UnderThreshold(t *testing.T) {
 		NoOfCalls:           5,
 		RecoveryTime:        time.Minute,
 	}
-	healthy, err := mt.CheckModelHealth("model_under", config)
+	healthy, err := mt.checkModelHealth("model_under", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if !healthy {
 		t.Errorf("Expected model to be healthy with average latency below threshold")
@@ -217,20 +217,20 @@ func TestCheckModelHealth_OverThreshold_NotRecovered(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_over_not_recovered")
+	mt, err := newMetricsTracker("test_metrics_over_not_recovered")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
 	}(mt)
 
 	// Insert a record with high latency (current timestamp).
-	if err := mt.RecordLatency("model_over", 200); err != nil {
-		t.Fatalf("RecordLatency() failed: %v", err)
+	if err := mt.recordLatency("model_over", 200); err != nil {
+		t.Fatalf("recordLatency() failed: %v", err)
 	}
 
 	config := &Config{
@@ -238,9 +238,9 @@ func TestCheckModelHealth_OverThreshold_NotRecovered(t *testing.T) {
 		NoOfCalls:           5,
 		RecoveryTime:        time.Minute, // 1 minute recovery period
 	}
-	healthy, err := mt.CheckModelHealth("model_over", config)
+	healthy, err := mt.checkModelHealth("model_over", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if healthy {
 		t.Errorf("Expected model to be unhealthy due to high latency and insufficient recovery time")
@@ -252,12 +252,12 @@ func TestCheckModelHealth_OverThreshold_Recovered(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_over_recovered")
+	mt, err := newMetricsTracker("test_metrics_over_recovered")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
@@ -275,9 +275,9 @@ func TestCheckModelHealth_OverThreshold_Recovered(t *testing.T) {
 		NoOfCalls:           5,
 		RecoveryTime:        time.Minute,
 	}
-	healthy, err := mt.CheckModelHealth("model_recovered", config)
+	healthy, err := mt.checkModelHealth("model_recovered", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if !healthy {
 		t.Errorf("Expected model to be healthy since recovery time has elapsed")
@@ -289,12 +289,12 @@ func TestCheckModelHealth_MaxNoOfCalls(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_maxcalls")
+	mt, err := newMetricsTracker("test_metrics_maxcalls")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
@@ -302,8 +302,8 @@ func TestCheckModelHealth_MaxNoOfCalls(t *testing.T) {
 
 	// Insert 12 records with high latency.
 	for i := 0; i < 12; i++ {
-		if err := mt.RecordLatency("model_max", 200); err != nil {
-			t.Fatalf("RecordLatency() failed: %v", err)
+		if err := mt.recordLatency("model_max", 200); err != nil {
+			t.Fatalf("recordLatency() failed: %v", err)
 		}
 		time.Sleep(1 * time.Millisecond)
 	}
@@ -313,9 +313,9 @@ func TestCheckModelHealth_MaxNoOfCalls(t *testing.T) {
 		NoOfCalls:           15,  // Should be clamped to 10.
 		RecoveryTime:        time.Minute,
 	}
-	healthy, err := mt.CheckModelHealth("model_max", config)
+	healthy, err := mt.checkModelHealth("model_max", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if healthy {
 		t.Errorf("Expected model to be unhealthy with high average latency using maximum of 10 calls")
@@ -327,12 +327,12 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_recovery_clamped")
+	mt, err := newMetricsTracker("test_metrics_recovery_clamped")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
-	defer func(mt *MetricsTracker) {
-		err := mt.Close()
+	defer func(mt *metricsTracker) {
+		err := mt.close()
 		if err != nil {
 
 		}
@@ -351,9 +351,9 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 		NoOfCalls:           5,
 		RecoveryTime:        2 * time.Hour,
 	}
-	healthy, err := mt.CheckModelHealth("model_clamped", config)
+	healthy, err := mt.checkModelHealth("model_clamped", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if !healthy {
 		t.Errorf("Expected model to be healthy since RecoveryTime is clamped to 1 hour and the record is older than 1 hour")
@@ -365,9 +365,9 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Manual insert failed: %v", err)
 	}
-	healthy, err = mt.CheckModelHealth("model_clamped", config)
+	healthy, err = mt.checkModelHealth("model_clamped", config)
 	if err != nil {
-		t.Fatalf("CheckModelHealth() failed: %v", err)
+		t.Fatalf("checkModelHealth() failed: %v", err)
 	}
 	if healthy {
 		t.Errorf("Expected model to be unhealthy due to a recent high-latency record")
@@ -379,19 +379,19 @@ func TestCloseMetricsTracker(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
 
-	mt, err := NewMetricsTracker("test_metrics_close")
+	mt, err := newMetricsTracker("test_metrics_close")
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
 
-	if err := mt.Close(); err != nil {
+	if err := mt.close(); err != nil {
 		t.Fatalf("closeConnection() failed: %v", err)
 	}
 
 	// Attempting to record latency after closeConnection should fail.
-	err = mt.RecordLatency("model_close", 100)
+	err = mt.recordLatency("model_close", 100)
 	if err == nil {
-		t.Errorf("Expected error when calling RecordLatency after closeConnection, got nil")
+		t.Errorf("Expected error when calling recordLatency after closeConnection, got nil")
 	}
 }
 
@@ -401,13 +401,13 @@ func TestDropMetricsTracker(t *testing.T) {
 	DataFolder, _ = filepath.Abs(tmpDir)
 
 	dbPath := "test_metrics_drop"
-	mt, err := NewMetricsTracker(dbPath)
+	mt, err := newMetricsTracker(dbPath)
 	if err != nil {
-		t.Fatalf("NewMetricsTracker() failed: %v", err)
+		t.Fatalf("newMetricsTracker() failed: %v", err)
 	}
 	dbFile := mt.db.Schema
 
-	if err := mt.Drop(); err != nil {
+	if err := mt.drop(); err != nil {
 		t.Fatalf("dropDB() failed: %v", err)
 	}
 	// Verify that the database file no longer exists.

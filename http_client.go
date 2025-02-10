@@ -16,11 +16,11 @@ import (
 type NotDiamondHttpClient struct {
 	*http.Client
 	config         *Config
-	metricsTracker *MetricsTracker
+	metricsTracker *metricsTracker
 }
 
 func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
-	metricsTracker, err := NewMetricsTracker("metrics")
+	metricsTracker, err := newMetricsTracker("metrics")
 	if err != nil {
 		errorLog("Failed to create metrics tracker:", err)
 		return nil, err
@@ -117,7 +117,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			timeout = t
 		}
 
-		healthy, _err := c.metricsTracker.CheckModelHealth(modelFull, c.config)
+		healthy, _err := c.metricsTracker.checkModelHealth(modelFull, c.config)
 		if _err != nil {
 			errorLog("Error checking model health:", _err)
 		}
@@ -146,7 +146,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 		elapsed := time.Since(startTime).Seconds()
 		// Record the latency in SQLite.
-		recErr := c.metricsTracker.RecordLatency(modelFull, elapsed)
+		recErr := c.metricsTracker.recordLatency(modelFull, elapsed)
 		if recErr != nil {
 			errorLog("Error recording latency:", recErr)
 		}

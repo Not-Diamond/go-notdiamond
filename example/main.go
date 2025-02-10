@@ -101,7 +101,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionss", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
@@ -137,10 +137,10 @@ func main() {
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
+		fmt.Print(string(body))
 		log.Fatalf("Failed to parse response: %v", err)
 	}
 
-	// Calculate time taken (assuming we store the start time before the request)
 	timeTaken := time.Since(startTime)
 
 	fmt.Printf("🤖 Model: %s\n", response.Model)

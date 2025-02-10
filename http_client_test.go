@@ -221,7 +221,7 @@ func TestTryWithRetries(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			transport := tt.setupTransport()
 			req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`))
-			metrics, err := NewMetricsTracker(":memory:" + tt.name)
+			metrics, err := newMetricsTracker(":memory:" + tt.name)
 			if err != nil {
 				log.Fatalf("Failed to open database connection: %v", err)
 			}
@@ -350,7 +350,7 @@ func TestTryNextModel(t *testing.T) {
 					},
 				}
 
-				metrics, err := NewMetricsTracker(":memory:" + "successful_azure_request")
+				metrics, err := newMetricsTracker(":memory:" + "successful_azure_request")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -401,7 +401,7 @@ func TestTryNextModel(t *testing.T) {
 						},
 					},
 				}
-				metrics, err := NewMetricsTracker(":memory:" + "successful_openai_request")
+				metrics, err := newMetricsTracker(":memory:" + "successful_openai_request")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -443,7 +443,7 @@ func TestTryNextModel(t *testing.T) {
 			setupClient: func() (*Client, *mockTransport) {
 				req, _ := http.NewRequest("POST", "https://api.openai.com", nil)
 				transport := &mockTransport{}
-				metrics, err := NewMetricsTracker(":memory:" + "provider_not_found")
+				metrics, err := newMetricsTracker(":memory:" + "provider_not_found")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -479,7 +479,7 @@ func TestTryNextModel(t *testing.T) {
 				transport := &mockTransport{
 					errors: []error{fmt.Errorf("network error")},
 				}
-				metrics, err := NewMetricsTracker(":memory:" + "http_client_error")
+				metrics, err := newMetricsTracker(":memory:" + "http_client_error")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -840,7 +840,7 @@ func TestDo(t *testing.T) {
 						},
 					},
 				}
-				metrics, err := NewMetricsTracker(":memory:" + "successful first attempt with ordered models")
+				metrics, err := newMetricsTracker(":memory:" + "successful first attempt with ordered models")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}

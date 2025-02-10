@@ -10,7 +10,7 @@ import (
 
 type Client struct {
 	clients        []http.Request
-	models         Models
+	models         models
 	modelProviders map[string]map[string]bool
 	isOrdered      bool
 	HttpClient     *NotDiamondHttpClient
