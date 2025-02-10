@@ -1,4 +1,4 @@
-module github.com/Not-Diamond/go-notdiamond-sdk
+module github.com/Not-Diamond/go-notdiamond
 
 go 1.21
 
