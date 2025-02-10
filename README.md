@@ -1,4 +1,4 @@
-# 💎 Not Diamond Go SDK [![Go Report Card](https://goreportcard.com/badge/github.com/Not-Diamond/notdiamond-golang)](https://goreportcard.com/report/github.com/Not-Diamond/notdiamond-golang)
+# 💎 Not Diamond Go SDK [![Go Report Card](https://goreportcard.com/badge/github.com/Not-Diamond/notdiamond-golang)](https://goreportcard.com/report/github.com/Not-Diamond/go-notdiamond)
 
 One line statement to improve reliability and uptime of LLM requests. [Documentation](https://docs.notdiamond.ai/docs/fallbacks-and-timeouts/)
 
