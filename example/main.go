@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/joho/godotenv"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"notdiamond"
@@ -22,6 +24,15 @@ func NewOpenAIRequest(url string, apiKey string) (*http.Request, error) {
 	req.Header.Set("api-key", apiKey)
 
 	return req, nil
+}
+func GetEnvVariable(key string) string {
+	err := godotenv.Load(".env")
+
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
+
+	return os.Getenv(key)
 }
 
 func main() {
@@ -80,6 +91,23 @@ func main() {
 				"401": 1,
 			},
 		},
+		ModelLatency: notdiamond.ModelLatency{
+			"openai/gpt-4o-mini": &notdiamond.RollingAverageLatency{
+				AvgLatencyThreshold: 0.002,
+				NoOfCalls:           5,                // Max 10
+				RecoveryTime:        30 * time.Second, // Max 1h
+			},
+			"azure/gpt-4o": &notdiamond.RollingAverageLatency{
+				AvgLatencyThreshold: 0.5,
+				NoOfCalls:           10,              // Max 10
+				RecoveryTime:        3 * time.Second, // Max 1h
+			},
+			"azure/gpt-4o-mini": &notdiamond.RollingAverageLatency{
+				AvgLatencyThreshold: 0.1,
+				NoOfCalls:           10,              // Max 10
+				RecoveryTime:        1 * time.Minute, // Max 1h
+			},
+		},
 	}
 
 	notdiamondClient, err := notdiamond.Init(config)
@@ -101,7 +129,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionsdssss", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
@@ -110,6 +138,7 @@ func main() {
 	req.Header.Set("Authorization", "Bearer "+openaiApiKey)
 
 	startTime := time.Now()
+
 	resp, err := notdiamondClient.Do(req)
 	if err != nil {
 		log.Fatalf("Failed to do request: %v", err)
