@@ -19,9 +19,11 @@ func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 	}
 
 	// Create the table if it does not exist.
-	err = db.makeTables(true, "model_metrics", map[string]string{
+	err = db.makeTables(true, "model_metrics", Message{
+		"reqID":   "TEXT",
 		"model":   "TEXT",
 		"latency": "REAL",
+		"status":  "TEXT",
 	})
 	if err != nil {
 		return nil, err
@@ -31,21 +33,21 @@ func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 }
 
 // recordLatency records a call's latency for a given model.
-func (mt *metricsTracker) recordLatency(model string, latency float64) error {
-	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)",
-		time.Now().UTC(), model, latency)
+func (mt *metricsTracker) recordLatency(reqID string, model string, latency float64, status string) error {
+	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, reqID, model, latency, status) VALUES(?, ?, ?, ?, ?)",
+		time.Now().UTC(), reqID, model, latency, status)
 	return err
 }
 
 // checkModelHealth returns true if the model is healthy (i.e. its average latency over the last
 // noOfCalls does not exceed avgLatency threshold). If the model is unhealthy, it is considered “blacklisted”
 // until recoveryTime has elapsed since the last call that exceeded the threshold.
-func (mt *metricsTracker) checkModelHealth(model string, config *Config) (bool, error) {
-	if config.NoOfCalls > 10 {
-		config.NoOfCalls = 10 // Enforce maximum
+func (mt *metricsTracker) checkModelHealth(reqID, model string, status string, config *Config) (bool, error) {
+	if config.ModelLatency[model].NoOfCalls > 10 {
+		config.ModelLatency[model].NoOfCalls = 10 // Enforce maximum
 	}
-	if config.RecoveryTime > time.Hour {
-		config.RecoveryTime = time.Hour // Enforce maximum
+	if config.ModelLatency[model].RecoveryTime > time.Hour {
+		config.ModelLatency[model].RecoveryTime = time.Hour // Enforce maximum
 	}
 
 	// executeQuery the most recent noOfCalls calls for the model.
@@ -55,7 +57,7 @@ func (mt *metricsTracker) checkModelHealth(model string, config *Config) (bool, 
 	ORDER BY timestamp DESC
 	LIMIT ?;
 	`
-	rows, err := mt.db.executeQuery(query, model, config.NoOfCalls)
+	rows, err := mt.db.executeQuery(query, reqID, model, status, config.ModelLatency[model].NoOfCalls)
 	if err != nil {
 		return false, err
 	}
@@ -98,9 +100,9 @@ func (mt *metricsTracker) checkModelHealth(model string, config *Config) (bool, 
 	}
 
 	average := totalLatency / float64(count)
-	if average > config.AvgLatencyThreshold {
+	if average > config.ModelLatency[model].AvgLatencyThreshold {
 		// Check if recovery_time has elapsed since the most recent call.
-		if time.Since(latestTime) < config.RecoveryTime {
+		if time.Since(latestTime) < config.ModelLatency[model].RecoveryTime {
 			// Model is unhealthy.
 			return false, nil
 		}

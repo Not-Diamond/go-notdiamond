@@ -26,15 +26,21 @@ const (
 	clientTypeOpenai clientType = "openai"
 )
 
-type Config struct {
-	Clients             []http.Request
-	Models              models
-	MaxRetries          map[string]int
-	Timeout             map[string]float64
-	ModelMessages       map[string][]Message
-	Backoff             map[string]float64
-	StatusCodeRetry     interface{}
+type RollingAverageLatency struct {
 	AvgLatencyThreshold float64
 	NoOfCalls           int
 	RecoveryTime        time.Duration
+}
+
+type ModelLatency map[string]RollingAverageLatency
+
+type Config struct {
+	Clients         []http.Request
+	Models          models
+	MaxRetries      map[string]int
+	Timeout         map[string]float64
+	ModelMessages   map[string][]Message
+	Backoff         map[string]float64
+	StatusCodeRetry interface{}
+	ModelLatency    ModelLatency
 }
