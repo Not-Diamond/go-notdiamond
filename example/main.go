@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"notdiamond"
 )
@@ -100,7 +101,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionss", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
@@ -108,16 +109,41 @@ func main() {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+openaiApiKey)
 
+	startTime := time.Now()
 	resp, err := notdiamondClient.Do(req)
 	if err != nil {
 		log.Fatalf("Failed to do request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
 
+		}
+	}(resp.Body)
+
+	// Read and parse response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalf("Failed to read response: %v", err)
 	}
 
-	fmt.Println(string(body))
+	var response struct {
+		Model   string `json:"model"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Fatalf("Failed to parse response: %v", err)
+	}
+
+	// Calculate time taken (assuming we store the start time before the request)
+	timeTaken := time.Since(startTime)
+
+	fmt.Printf("🤖 Model: %s\n", response.Model)
+	fmt.Printf("⏱️  Time: %.2fs\n", timeTaken.Seconds())
+	fmt.Printf("💬 Response: %s\n", response.Choices[0].Message.Content)
 }

@@ -47,9 +47,9 @@ func init() {
 	}
 }
 
-// MakeTables creates a table with the given name and columns.
+// makeTables creates a table with the given name and columns.
 // If timeSeries is true, an auto-increment primary key and a timestamp column are added.
-func (d *Database) MakeTables(timeSeries bool, tableName string, columns map[string]string) error {
+func (d *Database) makeTables(timeSeries bool, tableName string, columns map[string]string) error {
 	var sqlStmt string
 	if timeSeries {
 		sqlStmt = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -65,8 +65,8 @@ func (d *Database) MakeTables(timeSeries bool, tableName string, columns map[str
 	sqlStmt += ");"
 
 	if _, err := d.db.Exec(sqlStmt); err != nil {
-		err = errors.Wrap(err, "MakeTables Exec")
-		Error(err)
+		err = errors.Wrap(err, "makeTables execQuery")
+		errorLog(err)
 		return err
 	}
 
@@ -77,71 +77,71 @@ func (d *Database) MakeTables(timeSeries bool, tableName string, columns map[str
 		sqlStmt = fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_idx ON %s(key);`, tableName, tableName)
 	}
 	if _, err := d.db.Exec(sqlStmt); err != nil {
-		err = errors.Wrap(err, "MakeTables Index")
-		Error(err)
+		err = errors.Wrap(err, "makeTables Index")
+		errorLog(err)
 		return err
 	}
 
 	return nil
 }
 
-// Columns returns the list of column names for the specified table.
-func (d *Database) Columns(table string) ([]string, error) {
+// getColumns returns the list of column names for the specified table.
+func (d *Database) getColumns(table string) ([]string, error) {
 	rows, err := d.db.Query(fmt.Sprintf("SELECT * FROM %s LIMIT 1", table))
 	if err != nil {
-		return nil, errors.Wrap(err, "Columns Query")
+		return nil, errors.Wrap(err, "getColumns executeQuery")
 	}
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			Error(err)
+			errorLog(err)
 		}
 	}(rows)
 
 	cols, err := rows.Columns()
 	if err != nil {
-		return nil, errors.Wrap(err, "Columns Scan")
+		return nil, errors.Wrap(err, "getColumns Scan")
 	}
 	return cols, nil
 }
 
-// Get retrieves the JSON value associated with the specified key from the table,
+// getJSON retrieves the JSON value associated with the specified key from the table,
 // unmarshalling it into the provided interface.
-func (d *Database) Get(tableName, key string, v interface{}) error {
+func (d *Database) getJSON(tableName, key string, v interface{}) error {
 	query := fmt.Sprintf("SELECT value FROM %s WHERE key = ?", tableName)
 	stmt, err := d.db.Prepare(query)
 	if err != nil {
-		return errors.Wrap(err, "Get Prepare")
+		return errors.Wrap(err, "getJSON Prepare")
 	}
 	defer func(stmt *sql.Stmt) {
 		err := stmt.Close()
 		if err != nil {
-			Error(err)
+			errorLog(err)
 		}
 	}(stmt)
 
 	var result string
 	if err := stmt.QueryRow(key).Scan(&result); err != nil {
-		return errors.Wrap(err, "Get QueryRow")
+		return errors.Wrap(err, "getJSON QueryRow")
 	}
 
 	if err := json.Unmarshal([]byte(result), v); err != nil {
-		return errors.Wrap(err, "Get Unmarshal")
+		return errors.Wrap(err, "getJSON Unmarshal")
 	}
 	return nil
 }
 
-// Set inserts or updates the given key-value pair in the specified table.
+// setJSON inserts or updates the given key-value pair in the specified table.
 // The value is stored as a JSON string.
-func (d *Database) Set(tableName, key string, value interface{}) error {
+func (d *Database) setJSON(tableName, key string, value interface{}) error {
 	b, err := json.Marshal(value)
 	if err != nil {
-		return errors.Wrap(err, "Set Marshal")
+		return errors.Wrap(err, "setJSON Marshal")
 	}
 
 	tx, err := d.db.Begin()
 	if err != nil {
-		return errors.Wrap(err, "Set Begin")
+		return errors.Wrap(err, "setJSON Begin")
 	}
 	stmt, err := tx.Prepare(fmt.Sprintf("INSERT OR REPLACE INTO %s(key, value) VALUES (?, ?)", tableName))
 	if err != nil {
@@ -149,12 +149,12 @@ func (d *Database) Set(tableName, key string, value interface{}) error {
 		if err != nil {
 			return err
 		}
-		return errors.Wrap(err, "Set Prepare")
+		return errors.Wrap(err, "setJSON Prepare")
 	}
 	defer func(stmt *sql.Stmt) {
 		err := stmt.Close()
 		if err != nil {
-			Error(err)
+			errorLog(err)
 		}
 	}(stmt)
 
@@ -163,19 +163,19 @@ func (d *Database) Set(tableName, key string, value interface{}) error {
 		if err != nil {
 			return err
 		}
-		return errors.Wrap(err, "Set Exec")
+		return errors.Wrap(err, "setJSON execQuery")
 	}
 	if err := tx.Commit(); err != nil {
-		return errors.Wrap(err, "Set Commit")
+		return errors.Wrap(err, "setJSON Commit")
 	}
 	return nil
 }
 
-// Delete removes the record identified by key from the specified table.
-func (d *Database) Delete(tableName, key string) error {
+// deleteItem removes the record identified by key from the specified table.
+func (d *Database) deleteItem(tableName, key string) error {
 	tx, err := d.db.Begin()
 	if err != nil {
-		return errors.Wrap(err, "Delete Begin")
+		return errors.Wrap(err, "deleteItem Begin")
 	}
 	stmt, err := tx.Prepare(fmt.Sprintf("DELETE FROM %s WHERE key = ?", tableName))
 	if err != nil {
@@ -183,12 +183,12 @@ func (d *Database) Delete(tableName, key string) error {
 		if err != nil {
 			return err
 		}
-		return errors.Wrap(err, "Delete Prepare")
+		return errors.Wrap(err, "deleteItem Prepare")
 	}
 	defer func(stmt *sql.Stmt) {
 		err := stmt.Close()
 		if err != nil {
-			Error(err)
+			errorLog(err)
 		}
 	}(stmt)
 
@@ -197,30 +197,30 @@ func (d *Database) Delete(tableName, key string) error {
 		if err != nil {
 			return err
 		}
-		return errors.Wrap(err, "Delete Exec")
+		return errors.Wrap(err, "deleteItem execQuery")
 	}
 	if err := tx.Commit(); err != nil {
-		return errors.Wrap(err, "Delete Commit")
+		return errors.Wrap(err, "deleteItem Commit")
 	}
 	return nil
 }
 
-// Dump outputs a complete SQL dump of the database.
-func (d *Database) Dump() (string, error) {
+// dumpDB outputs a complete SQL dump of the database.
+func (d *Database) dumpDB() (string, error) {
 	var buf bytes.Buffer
 	writer := bufio.NewWriter(&buf)
 	if err := sqlite3dump.Dump(d.Schema, writer); err != nil {
-		return "", errors.Wrap(err, "Dump sqlite3dump")
+		return "", errors.Wrap(err, "dumpDB sqlite3dump")
 	}
 	if err := writer.Flush(); err != nil {
-		return "", errors.Wrap(err, "Dump Flush")
+		return "", errors.Wrap(err, "dumpDB Flush")
 	}
 	return buf.String(), nil
 }
 
-// Exists checks if a database file for the given name exists in the DataFolder.
+// entryExists checks if a database file for the given name exists in the DataFolder.
 // Non-readOnly databases are named using a base58 encoding.
-func Exists(name string) error {
+func entryExists(name string) error {
 	name = strings.TrimSpace(name)
 	fileName := filepath.Join(DataFolder, base58.FastBase58Encoding([]byte(name))+".sqlite3.db")
 	if _, err := os.Stat(fileName); err != nil {
@@ -229,21 +229,21 @@ func Exists(name string) error {
 	return nil
 }
 
-// Drop closes and removes the underlying database file.
-func (d *Database) Drop() error {
-	if err := d.Close(); err != nil {
-		return errors.Wrap(err, "Drop Close")
+// dropDB closes and removes the underlying database file.
+func (d *Database) dropDB() error {
+	if err := d.closeConnection(); err != nil {
+		return errors.Wrap(err, "dropDB closeConnection")
 	}
-	Debug("Deleting database file: %s", d.Schema)
+	debugLog("Deleting database file: %s", d.Schema)
 	if err := os.Remove(d.Schema); err != nil {
-		return errors.Wrap(err, "Drop Remove")
+		return errors.Wrap(err, "dropDB Remove")
 	}
 	return nil
 }
 
-// Open opens a SQLite3 database with the specified name.
+// openDB opens a SQLite3 database with the specified name.
 // If readOnly is false, the database file is created (using a base58 encoded name) if it does not exist.
-func Open(name string, readOnly bool) (*Database, error) {
+func openDB(name string, readOnly bool) (*Database, error) {
 	name = strings.TrimSpace(name)
 	d := &Database{
 		Schema: name,
@@ -277,41 +277,41 @@ func Open(name string, readOnly bool) (*Database, error) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Open the SQLite3 connection.
+	// openDB the SQLite3 connection.
 	var err error
 	d.db, err = sql.Open("sqlite3", d.Schema)
 	if err != nil {
-		return nil, errors.Wrap(err, "Open sql.Open")
+		return nil, errors.Wrap(err, "openDB sql.openDB")
 	}
 
 	// If new, create a default table.
 	if newDatabase {
-		if err := d.MakeTables(false, "keystore", map[string]string{"value": "TEXT"}); err != nil {
-			return nil, errors.Wrap(err, "Open MakeTables")
+		if err := d.makeTables(false, "keystore", map[string]string{"value": "TEXT"}); err != nil {
+			return nil, errors.Wrap(err, "openDB makeTables")
 		}
-		Debug("Created initial keystore table in new database")
+		debugLog("Created initial keystore table in new database")
 	}
 
 	return d, nil
 }
 
-// Debug sets the logger's level based on the debugMode flag.
-func (d *Database) Debug(debugMode bool) {
+// debugDB sets the logger's level based on the debugMode flag.
+func (d *Database) debugDB(debugMode bool) {
 	if debugMode {
-		SetLevel("debug")
+		setLevel("debug")
 	} else {
-		SetLevel("info")
+		setLevel("info")
 	}
 }
 
-// Close terminates the database connection and releases the file lock.
-func (d *Database) Close() error {
+// closeConnection terminates the database connection and releases the file lock.
+func (d *Database) closeConnection() error {
 	if d.isClosed {
 		return nil
 	}
 	if err := d.db.Close(); err != nil {
-		Error(err)
-		return errors.Wrap(err, "Close db.Close")
+		errorLog(err)
+		return errors.Wrap(err, "closeConnection db.closeConnection")
 	}
 	databaseLock.Lock()
 	delete(databaseLock.Locked, d.Schema)
@@ -320,19 +320,19 @@ func (d *Database) Close() error {
 	return nil
 }
 
-// Query executes a query that returns rows (e.g. SELECT).
-func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+// executeQuery executes a query that returns rows (e.g. SELECT).
+func (d *Database) executeQuery(query string, args ...interface{}) (*sql.Rows, error) {
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
-		return nil, errors.Wrap(err, "Query")
+		return nil, errors.Wrap(err, "executeQuery")
 	}
 	return rows, nil
 }
 
-// Exec executes a query without returning rows (e.g. INSERT, UPDATE, DELETE).
-func (d *Database) Exec(query string, args ...interface{}) error {
+// execQuery executes a query without returning rows (e.g. INSERT, UPDATE, DELETE).
+func (d *Database) execQuery(query string, args ...interface{}) error {
 	if _, err := d.db.Exec(query, args...); err != nil {
-		return errors.Wrap(err, "Exec")
+		return errors.Wrap(err, "execQuery")
 	}
 	return nil
 }

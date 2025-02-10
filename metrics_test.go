@@ -82,11 +82,11 @@ func TestNewMetricsTracker(t *testing.T) {
 		}
 	}(mt)
 
-	cols, err := mt.db.Columns("model_metrics")
+	cols, err := mt.db.getColumns("model_metrics")
 	if err != nil {
 		t.Fatalf("Failed to get columns for model_metrics: %v", err)
 	}
-	// When using MakeTables(true, ...), expect columns: id, timestamp, plus the columns we specified ("model" and "latency").
+	// When using makeTables(true, ...), expect columns: id, timestamp, plus the columns we specified ("model" and "latency").
 	expectedCols := []string{"id", "timestamp", "model", "latency"}
 	for _, col := range expectedCols {
 		found := false
@@ -122,10 +122,10 @@ func TestRecordLatency(t *testing.T) {
 		t.Fatalf("RecordLatency() failed: %v", err)
 	}
 
-	// Query the table to verify a record exists.
-	rows, err := mt.db.Query("SELECT latency FROM model_metrics WHERE model = ?", "model_record")
+	// executeQuery the table to verify a record exists.
+	rows, err := mt.db.executeQuery("SELECT latency FROM model_metrics WHERE model = ?", "model_record")
 	if err != nil {
-		t.Fatalf("Query() failed: %v", err)
+		t.Fatalf("executeQuery() failed: %v", err)
 	}
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
@@ -265,7 +265,7 @@ func TestCheckModelHealth_OverThreshold_Recovered(t *testing.T) {
 
 	// Manually insert a record with a timestamp older than the recovery time.
 	oldTime := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339Nano)
-	err = mt.db.Exec("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)", oldTime, "model_recovered", 200)
+	err = mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)", oldTime, "model_recovered", 200)
 	if err != nil {
 		t.Fatalf("Manual insert failed: %v", err)
 	}
@@ -340,12 +340,12 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 
 	// Insert a record with high latency and a timestamp older than 1 hour.
 	oldTime := time.Now().Add(-90 * time.Minute).UTC().Format(time.RFC3339Nano)
-	err = mt.db.Exec("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)", oldTime, "model_clamped", 200)
+	err = mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)", oldTime, "model_clamped", 200)
 	if err != nil {
 		t.Fatalf("Manual insert failed: %v", err)
 	}
 
-	// Set RecoveryTime to 2 hours; it should be clamped to 1 hour.
+	// setJSON RecoveryTime to 2 hours; it should be clamped to 1 hour.
 	config := &Config{
 		AvgLatencyThreshold: 100,
 		NoOfCalls:           5,
@@ -361,7 +361,7 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 
 	// Now insert a recent high-latency record.
 	recentTime := time.Now().Add(-30 * time.Minute).UTC().Format(time.RFC3339Nano)
-	err = mt.db.Exec("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)", recentTime, "model_clamped", 200)
+	err = mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)", recentTime, "model_clamped", 200)
 	if err != nil {
 		t.Fatalf("Manual insert failed: %v", err)
 	}
@@ -385,17 +385,17 @@ func TestCloseMetricsTracker(t *testing.T) {
 	}
 
 	if err := mt.Close(); err != nil {
-		t.Fatalf("Close() failed: %v", err)
+		t.Fatalf("closeConnection() failed: %v", err)
 	}
 
-	// Attempting to record latency after Close should fail.
+	// Attempting to record latency after closeConnection should fail.
 	err = mt.RecordLatency("model_close", 100)
 	if err == nil {
-		t.Errorf("Expected error when calling RecordLatency after Close, got nil")
+		t.Errorf("Expected error when calling RecordLatency after closeConnection, got nil")
 	}
 }
 
-// TestDropMetricsTracker verifies that Drop closes the database and removes the underlying file.
+// TestDropMetricsTracker verifies that dropDB closes the database and removes the underlying file.
 func TestDropMetricsTracker(t *testing.T) {
 	tmpDir := t.TempDir()
 	DataFolder, _ = filepath.Abs(tmpDir)
@@ -408,10 +408,10 @@ func TestDropMetricsTracker(t *testing.T) {
 	dbFile := mt.db.Schema
 
 	if err := mt.Drop(); err != nil {
-		t.Fatalf("Drop() failed: %v", err)
+		t.Fatalf("dropDB() failed: %v", err)
 	}
 	// Verify that the database file no longer exists.
 	if _, err := os.Stat(dbFile); !os.IsNotExist(err) {
-		t.Errorf("Expected database file %q to be removed after Drop(), but it exists", dbFile)
+		t.Errorf("Expected database file %q to be removed after dropDB(), but it exists", dbFile)
 	}
 }

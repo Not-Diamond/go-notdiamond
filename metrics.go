@@ -13,13 +13,13 @@ type MetricsTracker struct {
 // NewMetricsTracker initializes the SQLite database (stored in the file given by dbPath)
 // and creates the table if needed.
 func NewMetricsTracker(dbPath string) (*MetricsTracker, error) {
-	db, err := Open(dbPath, false)
+	db, err := openDB(dbPath, false)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create the table if it does not exist.
-	err = db.MakeTables(true, "model_metrics", map[string]string{
+	err = db.makeTables(true, "model_metrics", map[string]string{
 		"model":   "TEXT",
 		"latency": "REAL",
 	})
@@ -32,7 +32,7 @@ func NewMetricsTracker(dbPath string) (*MetricsTracker, error) {
 
 // RecordLatency records a call's latency for a given model.
 func (mt *MetricsTracker) RecordLatency(model string, latency float64) error {
-	err := mt.db.Exec("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)",
+	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)",
 		time.Now().UTC(), model, latency)
 	return err
 }
@@ -48,14 +48,14 @@ func (mt *MetricsTracker) CheckModelHealth(model string, config *Config) (bool, 
 		config.RecoveryTime = time.Hour // Enforce maximum
 	}
 
-	// Query the most recent noOfCalls calls for the model.
+	// executeQuery the most recent noOfCalls calls for the model.
 	query := `
 	SELECT timestamp, latency FROM model_metrics
 	WHERE model = ?
 	ORDER BY timestamp DESC
 	LIMIT ?;
 	`
-	rows, err := mt.db.Query(query, model, config.NoOfCalls)
+	rows, err := mt.db.executeQuery(query, model, config.NoOfCalls)
 	if err != nil {
 		return false, err
 	}
@@ -63,7 +63,7 @@ func (mt *MetricsTracker) CheckModelHealth(model string, config *Config) (bool, 
 		err := rows.Close()
 		if err != nil {
 			// Log error but don't return it.
-			Error("Failed to close rows:", err)
+			errorLog("Failed to close rows:", err)
 		}
 	}(rows)
 
@@ -111,10 +111,10 @@ func (mt *MetricsTracker) CheckModelHealth(model string, config *Config) (bool, 
 
 // Close closes the underlying database connection.
 func (mt *MetricsTracker) Close() error {
-	return mt.db.Close()
+	return mt.db.closeConnection()
 }
 
 // Drop closes the underlying database connection.
 func (mt *MetricsTracker) Drop() error {
-	return mt.db.Drop()
+	return mt.db.dropDB()
 }

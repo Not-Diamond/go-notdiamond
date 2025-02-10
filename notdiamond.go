@@ -21,10 +21,10 @@ type contextKey string
 const NotdiamondClientKey contextKey = "notdiamondClient"
 
 func Init(config Config) (*Client, error) {
-	Info("Initializing NotDiamondClient")
+	infoLog("⚡ Initializing Client...")
 
 	if err := validateConfig(config); err != nil {
-		Error("Config validation failed:", err)
+		errorLog("Config validation failed:", err)
 		return nil, err
 	}
 

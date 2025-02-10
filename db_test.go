@@ -21,31 +21,31 @@ func contains(slice []string, item string) bool {
 // TestOpenNewDatabase verifies that a new database is created and contains the default "keystore" table.
 func TestOpenNewDatabase(t *testing.T) {
 	dbName := "testdb_open"
-	db, err := Open(dbName, false)
+	db, err := openDB(dbName, false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	// Check that the keystore table exists.
-	cols, err := db.Columns("keystore")
+	cols, err := db.getColumns("keystore")
 	if err != nil {
-		t.Errorf("Columns() failed: %v", err)
+		t.Errorf("getColumns() failed: %v", err)
 	}
 	if len(cols) == 0 {
 		t.Error("keystore table should have columns")
 	}
-	if err := db.Close(); err != nil {
-		t.Errorf("Close() failed: %v", err)
+	if err := db.closeConnection(); err != nil {
+		t.Errorf("closeConnection() failed: %v", err)
 	}
 }
 
 // TestMakeTables creates both a non–timeseries table and a timeseries table and verifies their column names.
 func TestMakeTables(t *testing.T) {
-	db, err := Open("testdb_make", false)
+	db, err := openDB("testdb_make", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
@@ -56,12 +56,12 @@ func TestMakeTables(t *testing.T) {
 	columns := map[string]string{
 		"value": "TEXT",
 	}
-	if err := db.MakeTables(false, nonTSTable, columns); err != nil {
-		t.Fatalf("MakeTables(non-timeseries) failed: %v", err)
+	if err := db.makeTables(false, nonTSTable, columns); err != nil {
+		t.Fatalf("makeTables(non-timeseries) failed: %v", err)
 	}
-	cols, err := db.Columns(nonTSTable)
+	cols, err := db.getColumns(nonTSTable)
 	if err != nil {
-		t.Fatalf("Columns(non_ts) failed: %v", err)
+		t.Fatalf("getColumns(non_ts) failed: %v", err)
 	}
 	// For non-timeseries tables, expect a primary key column "key" plus our custom columns.
 	if !contains(cols, "key") {
@@ -76,12 +76,12 @@ func TestMakeTables(t *testing.T) {
 	columnsTS := map[string]string{
 		"metric": "REAL",
 	}
-	if err := db.MakeTables(true, tsTable, columnsTS); err != nil {
-		t.Fatalf("MakeTables(timeseries) failed: %v", err)
+	if err := db.makeTables(true, tsTable, columnsTS); err != nil {
+		t.Fatalf("makeTables(timeseries) failed: %v", err)
 	}
-	cols, err = db.Columns(tsTable)
+	cols, err = db.getColumns(tsTable)
 	if err != nil {
-		t.Fatalf("Columns(ts_table) failed: %v", err)
+		t.Fatalf("getColumns(ts_table) failed: %v", err)
 	}
 	// For timeseries tables, expect "id", "timestamp" plus custom columns.
 	if !contains(cols, "id") {
@@ -95,14 +95,14 @@ func TestMakeTables(t *testing.T) {
 	}
 }
 
-// TestSetGetDelete exercises the Set, Get, and Delete operations.
+// TestSetGetDelete exercises the setJSON, getJSON, and deleteItem operations.
 func TestSetGetDelete(t *testing.T) {
-	db, err := Open("testdb_setget", false)
+	db, err := openDB("testdb_setget", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
@@ -112,38 +112,38 @@ func TestSetGetDelete(t *testing.T) {
 	key := "testKey"
 	value := "testValue"
 
-	// Test Set.
-	if err := db.Set(tableName, key, value); err != nil {
-		t.Fatalf("Set() failed: %v", err)
+	// Test setJSON.
+	if err := db.setJSON(tableName, key, value); err != nil {
+		t.Fatalf("setJSON() failed: %v", err)
 	}
 
-	// Test Get.
+	// Test getJSON.
 	var got string
-	if err := db.Get(tableName, key, &got); err != nil {
-		t.Fatalf("Get() failed: %v", err)
+	if err := db.getJSON(tableName, key, &got); err != nil {
+		t.Fatalf("getJSON() failed: %v", err)
 	}
 	if got != value {
-		t.Errorf("Get() returned %v; want %v", got, value)
+		t.Errorf("getJSON() returned %v; want %v", got, value)
 	}
 
-	// Test Delete.
-	if err := db.Delete(tableName, key); err != nil {
-		t.Fatalf("Delete() failed: %v", err)
+	// Test deleteItem.
+	if err := db.deleteItem(tableName, key); err != nil {
+		t.Fatalf("deleteItem() failed: %v", err)
 	}
-	// After deletion, Get should return an error.
-	if err := db.Get(tableName, key, &got); err == nil {
-		t.Errorf("Expected error after Delete, got nil")
+	// After deletion, getJSON should return an error.
+	if err := db.getJSON(tableName, key, &got); err == nil {
+		t.Errorf("Expected error after deleteItem, got nil")
 	}
 }
 
-// TestDump verifies that Dump returns an SQL dump containing known table names.
+// TestDump verifies that dumpDB returns an SQL dump containing known table names.
 func TestDump(t *testing.T) {
-	db, err := Open("testdb_dump", false)
+	db, err := openDB("testdb_dump", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
@@ -152,87 +152,87 @@ func TestDump(t *testing.T) {
 	// Insert a value into keystore.
 	key := "dumpKey"
 	value := "dumpValue"
-	if err := db.Set("keystore", key, value); err != nil {
-		t.Fatalf("Set() failed: %v", err)
+	if err := db.setJSON("keystore", key, value); err != nil {
+		t.Fatalf("setJSON() failed: %v", err)
 	}
 
-	dump, err := db.Dump()
+	dump, err := db.dumpDB()
 	if err != nil {
-		t.Fatalf("Dump() failed: %v", err)
+		t.Fatalf("dumpDB() failed: %v", err)
 	}
 	if !strings.Contains(dump, "keystore") {
-		t.Errorf("Dump() does not contain 'keystore' table definition")
+		t.Errorf("dumpDB() does not contain 'keystore' table definition")
 	}
 }
 
-// TestExists verifies the Exists function for both an existing and a non-existing database.
+// TestExists verifies the entryExists function for both an existing and a non-existing database.
 func TestExists(t *testing.T) {
 	dbName := "existsdb"
-	db, err := Open(dbName, false)
+	db, err := openDB(dbName, false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
-	err = db.Close()
+	err = db.closeConnection()
 	if err != nil {
-		t.Errorf("Close() failed: %v", err)
+		t.Errorf("closeConnection() failed: %v", err)
 	}
 
-	// Exists should succeed.
-	if err := Exists(dbName); err != nil {
-		t.Errorf("Exists() returned error for existing DB: %v", err)
+	// entryExists should succeed.
+	if err := entryExists(dbName); err != nil {
+		t.Errorf("entryExists() returned error for existing DB: %v", err)
 	}
 
-	// For a non-existent database, Exists should return an error.
+	// For a non-existent database, entryExists should return an error.
 	nonExisting := "nonexistentdb"
-	if err := Exists(nonExisting); err == nil {
-		t.Errorf("Exists() expected error for non-existing DB")
+	if err := entryExists(nonExisting); err == nil {
+		t.Errorf("entryExists() expected error for non-existing DB")
 	}
 }
 
-// TestDrop ensures that Drop closes the DB, releases the lock, and removes the file.
+// TestDrop ensures that dropDB closes the DB, releases the lock, and removes the file.
 func TestDrop(t *testing.T) {
 	dbName := "dropdb"
-	db, err := Open(dbName, false)
+	db, err := openDB(dbName, false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	dbFile := db.Schema
 
-	if err := db.Drop(); err != nil {
-		t.Fatalf("Drop() failed: %v", err)
+	if err := db.dropDB(); err != nil {
+		t.Fatalf("dropDB() failed: %v", err)
 	}
 	// Verify that the file no longer exists.
 	if _, err := os.Stat(dbFile); !os.IsNotExist(err) {
-		t.Errorf("Database file still exists after Drop()")
+		t.Errorf("Database file still exists after dropDB()")
 	}
 }
 
-// TestQueryExec tests Exec and Query by creating a temporary table, inserting a row, and querying it.
+// TestQueryExec tests execQuery and executeQuery by creating a temporary table, inserting a row, and querying it.
 func TestQueryExec(t *testing.T) {
-	db, err := Open("testdb_queryexec", false)
+	db, err := openDB("testdb_queryexec", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
 	}(db)
 
 	createStmt := `CREATE TABLE IF NOT EXISTS temp_table (id INTEGER PRIMARY KEY, name TEXT);`
-	if err := db.Exec(createStmt); err != nil {
-		t.Fatalf("Exec(create table) failed: %v", err)
+	if err := db.execQuery(createStmt); err != nil {
+		t.Fatalf("execQuery(create table) failed: %v", err)
 	}
 
 	insertStmt := `INSERT INTO temp_table (name) VALUES (?);`
-	if err := db.Exec(insertStmt, "Alice"); err != nil {
-		t.Fatalf("Exec(insert) failed: %v", err)
+	if err := db.execQuery(insertStmt, "Alice"); err != nil {
+		t.Fatalf("execQuery(insert) failed: %v", err)
 	}
 
-	rows, err := db.Query("SELECT name FROM temp_table WHERE name = ?", "Alice")
+	rows, err := db.executeQuery("SELECT name FROM temp_table WHERE name = ?", "Alice")
 	if err != nil {
-		t.Fatalf("Query() failed: %v", err)
+		t.Fatalf("executeQuery() failed: %v", err)
 	}
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
@@ -250,24 +250,24 @@ func TestQueryExec(t *testing.T) {
 			t.Errorf("Expected 'Alice', got %v", name)
 		}
 	} else {
-		t.Errorf("No rows returned from Query()")
+		t.Errorf("No rows returned from executeQuery()")
 	}
 }
 
-// TestInvalidQuery ensures that Exec returns an error for an invalid SQL statement.
+// TestInvalidQuery ensures that execQuery returns an error for an invalid SQL statement.
 func TestInvalidQuery(t *testing.T) {
-	db, err := Open("testdb_invalidquery", false)
+	db, err := openDB("testdb_invalidquery", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
 	}(db)
 
-	err = db.Exec("INVALID SQL STATEMENT")
+	err = db.execQuery("INVALID SQL STATEMENT")
 	if err == nil {
 		t.Errorf("Expected error for invalid SQL statement, got nil")
 	}
@@ -276,10 +276,10 @@ func TestInvalidQuery(t *testing.T) {
 // TestConcurrentOpen verifies that concurrent attempts to open the same DB wait until the lock is released.
 func TestConcurrentOpen(t *testing.T) {
 	dbName := "concurrentdb"
-	// Open the first instance.
-	db1, err := Open(dbName, false)
+	// openDB the first instance.
+	db1, err := openDB(dbName, false)
 	if err != nil {
-		t.Fatalf("Open() db1 failed: %v", err)
+		t.Fatalf("openDB() db1 failed: %v", err)
 	}
 	// Do not close db1 immediately so that it holds the lock.
 	var db2 *Database
@@ -287,80 +287,80 @@ func TestConcurrentOpen(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// This call should block until db1 is closed.
-		db2, err2 = Open(dbName, false)
+		db2, err2 = openDB(dbName, false)
 		close(done)
 	}()
 
 	// Wait a moment to ensure the goroutine is blocked.
 	time.Sleep(50 * time.Millisecond)
-	if err := db1.Close(); err != nil {
-		t.Fatalf("Close() db1 failed: %v", err)
+	if err := db1.closeConnection(); err != nil {
+		t.Fatalf("closeConnection() db1 failed: %v", err)
 	}
 
 	select {
 	case <-done:
 		if err2 != nil {
-			t.Errorf("Open() db2 failed: %v", err2)
+			t.Errorf("openDB() db2 failed: %v", err2)
 		}
 		if db2 == nil {
 			t.Errorf("db2 is nil")
 		} else {
-			err := db2.Close()
+			err := db2.closeConnection()
 			if err != nil {
 				return
 			}
 		}
 	case <-time.After(2 * time.Second):
-		t.Errorf("Timeout waiting for concurrent Open() to complete")
+		t.Errorf("Timeout waiting for concurrent openDB() to complete")
 	}
 }
 
-// TestCloseIdempotent verifies that calling Close multiple times does not produce an error.
+// TestCloseIdempotent verifies that calling closeConnection multiple times does not produce an error.
 func TestCloseIdempotent(t *testing.T) {
-	db, err := Open("testdb_close", false)
+	db, err := openDB("testdb_close", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("First Close() failed: %v", err)
+	if err := db.closeConnection(); err != nil {
+		t.Fatalf("First closeConnection() failed: %v", err)
 	}
-	// Second Close() should be a no-op.
-	if err := db.Close(); err != nil {
-		t.Errorf("Second Close() returned error: %v", err)
+	// Second closeConnection() should be a no-op.
+	if err := db.closeConnection(); err != nil {
+		t.Errorf("Second closeConnection() returned error: %v", err)
 	}
 }
 
-// TestDebug calls Debug to verify no panic occurs.
+// TestDebug calls debugDB to verify no panic occurs.
 func TestDebug(t *testing.T) {
-	db, err := Open("testdb_debug", false)
+	db, err := openDB("testdb_debug", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
 	}(db)
-	db.Debug(true)
-	db.Debug(false)
+	db.debugDB(true)
+	db.debugDB(false)
 }
 
-// TestGetNonexistentKey verifies that Get returns an error when a key does not exist.
+// TestGetNonexistentKey verifies that getJSON returns an error when a key does not exist.
 func TestGetNonexistentKey(t *testing.T) {
-	db, err := Open("testdb_nonexistent", false)
+	db, err := openDB("testdb_nonexistent", false)
 	if err != nil {
-		t.Fatalf("Open() failed: %v", err)
+		t.Fatalf("openDB() failed: %v", err)
 	}
 	defer func(db *Database) {
-		err := db.Close()
+		err := db.closeConnection()
 		if err != nil {
 
 		}
 	}(db)
 
 	var result string
-	err = db.Get("keystore", "nonexistent", &result)
+	err = db.getJSON("keystore", "nonexistent", &result)
 	if err == nil {
 		t.Errorf("Expected error for non-existent key, got nil")
 	}

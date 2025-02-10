@@ -13,7 +13,7 @@ func init() {
 }
 
 // SetLevel sets the logging level
-func SetLevel(level string) {
+func setLevel(level string) {
 	switch level {
 	case "debug":
 		Log.SetLevel(logrus.DebugLevel)
@@ -28,18 +28,18 @@ func SetLevel(level string) {
 	}
 }
 
-func Debug(format string, args ...interface{}) {
+func debugLog(format string, args ...interface{}) {
 	Log.Debugf(format, args...)
 }
 
-func Info(args ...interface{}) {
+func infoLog(args ...interface{}) {
 	Log.Info(args...)
 }
 
-func Warn(args ...interface{}) {
+func warnLog(args ...interface{}) {
 	Log.Warn(args...)
 }
 
-func Error(args ...interface{}) {
+func errorLog(args ...interface{}) {
 	Log.Error(args...)
 }

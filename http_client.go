@@ -22,7 +22,7 @@ type NotDiamondHttpClient struct {
 func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
 	metricsTracker, err := NewMetricsTracker("metrics")
 	if err != nil {
-		Error("Failed to create metrics tracker:", err)
+		errorLog("Failed to create metrics tracker:", err)
 		return nil, err
 	}
 
@@ -34,7 +34,7 @@ func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
 }
 
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
-	Info("Doing request via custom Do: ", req.URL.String())
+	infoLog("📡 Executing request: ", req.URL.String())
 
 	messages := extractMessagesFromRequest(req)
 	model := extractModelFromRequest(req)
@@ -63,14 +63,12 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 			}
 		}
 
-		Info("Models to try in order: ", modelsToTry)
-
 		for _, modelFull := range modelsToTry {
 			if resp, err := c.tryWithRetries(modelFull, req, messages, originalCtx); err == nil {
 				return resp, nil
 			} else {
 				lastErr = err
-				Error("Attempt failed for model ", modelFull, ": ", err)
+				errorLog("Attempt failed for model ", modelFull, ": ", err)
 			}
 		}
 	}
@@ -79,7 +77,6 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCode int) int {
-	Info("Getting max retries for status code: ", statusCode)
 	// Check model-specific status code retries first
 	if modelRetries, ok := c.config.StatusCodeRetry.(map[string]map[string]int); ok {
 		if modelConfig, exists := modelRetries[modelFull]; exists {
@@ -113,7 +110,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			break
 		}
 
-		Info(fmt.Sprintf("Attempt %d of %d for model %s", attempt+1, maxRetries, modelFull))
+		infoLog(fmt.Sprintf("🔄 Attempt %d of %d for model %s", attempt+1, maxRetries, modelFull))
 
 		timeout := 30.0
 		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
@@ -122,11 +119,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 		healthy, _err := c.metricsTracker.CheckModelHealth(modelFull, c.config)
 		if _err != nil {
-			Error("Error checking model health:", _err)
+			errorLog("Error checking model health:", _err)
 		}
 		if !healthy {
 			lastErr = fmt.Errorf("model %s is unhealthy (average latency too high)", modelFull)
-			Error(lastErr)
+			errorLog(lastErr)
 			// Do not retry further; return error to trigger fallback.
 			return nil, lastErr
 		}
@@ -151,13 +148,13 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		// Record the latency in SQLite.
 		recErr := c.metricsTracker.RecordLatency(modelFull, elapsed)
 		if recErr != nil {
-			Error("Error recording latency:", recErr)
+			errorLog("Error recording latency:", recErr)
 		}
 
 		if err != nil {
 			cancel()
 			lastErr = err
-			Error("Request failed:", err)
+			errorLog("❌ Request failed ", lastErr)
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
 			}
@@ -187,8 +184,26 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 				}, nil
 			}
 
-			lastErr = fmt.Errorf("request failed with status code %d: %s", resp.StatusCode, string(body))
-			Error("Request failed:", lastErr)
+			// Parse error response body if possible
+			var errorResponse struct {
+				Error struct {
+					Message string `json:"message"`
+					Type    string `json:"type"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(body, &errorResponse); err == nil && errorResponse.Error.Message != "" {
+				lastErr = fmt.Errorf("with status %d (%s): %s",
+					resp.StatusCode,
+					http.StatusText(resp.StatusCode),
+					errorResponse.Error.Message)
+			} else {
+				// Fallback to raw body if can't parse error response
+				lastErr = fmt.Errorf("with status %d (%s): %s",
+					resp.StatusCode,
+					http.StatusText(resp.StatusCode),
+					string(body))
+			}
+			errorLog("❌ Request failed ", lastErr)
 		}
 
 		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
@@ -273,12 +288,13 @@ func tryNextModel(client *Client, modelFull string, messages []Message, ctx cont
 	for _, clientReq := range client.clients {
 		if strings.Contains(clientReq.URL.String(), nextProvider) {
 			nextReq = clientReq.Clone(ctx)
-			Info("Fallback URL: ", nextReq.URL.String())
+			infoLog("⚠️  Fallback to model:", modelFull, "| URL:", nextReq.URL.String())
 			break
 		}
 	}
 
 	if nextReq == nil {
+		infoLog("⚠️ No more fallbacks available for model:", modelFull)
 		return nil, fmt.Errorf("no client found for provider %s", nextProvider)
 	}
 

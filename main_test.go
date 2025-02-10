@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Set the global DataFolder for the innerDB package.
+	// setJSON the global DataFolder for the innerDB package.
 	DataFolder = tmpDir
 
 	// Run tests
