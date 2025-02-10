@@ -18,7 +18,7 @@ type Client struct {
 
 type contextKey string
 
-const NotdiamondClientKey contextKey = "notdiamondClient"
+const clientKey contextKey = "notdiamondClient"
 
 func Init(config Config) (*Client, error) {
 	infoLog("⚡ Initializing Client...")
@@ -76,7 +76,7 @@ func Init(config Config) (*Client, error) {
 // Do Extend and added context to the request
 // So the package can be used without manually passing not diamond client to the ctx
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	ctx := context.WithValue(context.Background(), NotdiamondClientKey, c)
+	ctx := context.WithValue(context.Background(), clientKey, c)
 
 	newReq := req.Clone(ctx)
 	if req.Body != nil {

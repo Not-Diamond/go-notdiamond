@@ -44,7 +44,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	originalCtx := req.Context()
 
-	if client, ok := originalCtx.Value(NotdiamondClientKey).(*Client); ok {
+	if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 		var modelsToTry []string
 
 		if client.isOrdered {
@@ -139,7 +139,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			currentReq := req.Clone(ctx)
 			resp, err = c.Client.Do(currentReq)
 		} else {
-			if client, ok := originalCtx.Value(NotdiamondClientKey).(*Client); ok {
+			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 				resp, err = tryNextModel(client, modelFull, messages, ctx)
 			}
 		}

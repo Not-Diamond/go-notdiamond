@@ -239,7 +239,7 @@ func TestTryWithRetries(t *testing.T) {
 				metricsTracker: metrics,
 			}
 
-			ctx := context.WithValue(context.Background(), NotdiamondClientKey, &Client{
+			ctx := context.WithValue(context.Background(), clientKey, &Client{
 				clients:    []http.Request{*req},
 				HttpClient: httpClient,
 			})
@@ -874,7 +874,7 @@ func TestDo(t *testing.T) {
 				models:     OrderedModels{"openai/gpt-4", "azure/gpt-4"},
 				isOrdered:  true,
 			}
-			ctx := context.WithValue(context.Background(), NotdiamondClientKey, notDiamondClient)
+			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
 			req = req.WithContext(ctx)
 
 			// Make the request
