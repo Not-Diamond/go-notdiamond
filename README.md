@@ -158,3 +158,11 @@ config := notdiamond.Config{
 	},
 }
 ```
+
+## Average Rolling Latency Fallback
+
+Configure custom average rolling latency threshold and recovery time for each model:
+
+```go
+// TODO: Add example
+```

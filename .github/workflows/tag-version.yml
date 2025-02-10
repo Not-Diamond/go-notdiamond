@@ -14,45 +14,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get latest version
-        id: get_version
-        run: |
-          # Get the latest version tag (if any)
-          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "Latest tag: $latest_tag"
-          echo "latest_tag=${latest_tag}" >> $GITHUB_OUTPUT
-
-      - name: Create new version
-        id: create_version
-        run: |
-          # Get the commit message
-          commit_msg=$(git log -1 --pretty=%B)
-          echo "Commit message: $commit_msg"
-
-          # Extract current version numbers
-          current_version=${latest_tag#v}
-          IFS='.' read -r major minor patch <<< "$current_version"
-
-          # Determine version bump based on commit message
-          if [[ $commit_msg == *"BREAKING CHANGE"* ]] || [[ $commit_msg == *"!:"* ]]; then
-            new_version="v$((major + 1)).0.0"
-          elif [[ $commit_msg == *"feat:"* ]]; then
-            new_version="v$major.$((minor + 1)).0"
-          elif [[ $commit_msg == *"fix:"* ]]; then
-            new_version="v$major.$minor.$((patch + 1))"
-          else
-            echo "No version bump needed"
-            exit 0
-          fi
-
-          echo "new_version=${new_version}" >> $GITHUB_OUTPUT
-          echo "New version: $new_version"
-
-      - name: Create and push tag
-        if: steps.create_version.outputs.new_version != ''
-        run: |
-          new_version=${{ steps.create_version.outputs.new_version }}
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git tag -a $new_version -m "Release $new_version"
-          git push origin $new_version
+      - name: Bump version and push tag
+        uses: anothrNick/github-tag-action@1.67.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WITH_V: true
+          DEFAULT_BUMP: patch
+          RELEASE_BRANCHES: main
