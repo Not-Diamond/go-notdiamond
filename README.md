@@ -3,7 +3,7 @@
 One line statement to improve reliability and uptime of LLM requests. [Documentation](https://docs.notdiamond.ai/docs/fallbacks-and-timeouts/)
 
 > **Note**
-> Currently only **OpenAI** and **Azure** are supported.
+> Currently only **OpenAI** and **Azure** models are supported.
 
 ## ✨ Features:
 

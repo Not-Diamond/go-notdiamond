@@ -62,7 +62,7 @@ func (mt *metricsTracker) checkModelHealth(model string, config *Config) (bool, 
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			// Log error but don't return it.
+			// logger error but don't return it.
 			errorLog("Failed to close rows:", err)
 		}
 	}(rows)

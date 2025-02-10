@@ -100,7 +100,7 @@ func TestInit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use a temporary directory for the database files so that each test is isolated.
-			DataFolder = t.TempDir()
+			dataFolder = t.TempDir()
 
 			client, err := Init(tt.config)
 			if (err != nil) != tt.wantErr {

@@ -20,9 +20,9 @@ import (
 	"github.com/schollz/sqlite3dump"
 )
 
-// DataFolder is the directory where all SQLite3 databases are stored.
+// dataFolder is the directory where all SQLite3 databases are stored.
 // It should be set to an absolute path in production.
-var DataFolder = "."
+var dataFolder = "."
 
 // database represents a SQLite database instance.
 type database struct {
@@ -218,11 +218,11 @@ func (d *database) dumpDB() (string, error) {
 	return buf.String(), nil
 }
 
-// entryExists checks if a database file for the given name exists in the DataFolder.
+// entryExists checks if a database file for the given name exists in the dataFolder.
 // Non-readOnly databases are named using a base58 encoding.
 func entryExists(name string) error {
 	name = strings.TrimSpace(name)
-	fileName := filepath.Join(DataFolder, base58.FastBase58Encoding([]byte(name))+".sqlite3.db")
+	fileName := filepath.Join(dataFolder, base58.FastBase58Encoding([]byte(name))+".sqlite3.db")
 	if _, err := os.Stat(fileName); err != nil {
 		return errors.Errorf("database '%s' does not exist", fileName)
 	}
@@ -247,14 +247,14 @@ func openDB(name string, readOnly bool) (*database, error) {
 	name = strings.TrimSpace(name)
 	d := &database{
 		Schema: name,
-		logger: Log, // Ensure your logger provides this constructor.
+		logger: logger, // Ensure your logger provides this constructor.
 	}
 
 	if readOnly {
-		d.Schema = filepath.Join(DataFolder, name)
+		d.Schema = filepath.Join(dataFolder, name)
 	} else {
 		encodedName := base58.FastBase58Encoding([]byte(name))
-		d.Schema = filepath.Join(DataFolder, encodedName+".sqlite3.db")
+		d.Schema = filepath.Join(dataFolder, encodedName+".sqlite3.db")
 	}
 
 	// Determine if this is a new (non-readOnly) database.

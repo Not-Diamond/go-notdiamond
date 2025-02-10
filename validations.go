@@ -103,7 +103,7 @@ func validateModelName(model string) error {
 
 func validateProvider(provider string) error {
 	switch provider {
-	case string(ClientTypeAzure), string(ClientTypeOpenAI):
+	case string(clientTypeAzure), string(clientTypeOpenai):
 		return nil
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)

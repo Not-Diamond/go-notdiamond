@@ -4,10 +4,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var Log = logrus.New()
+var logger = logrus.New()
 
 func init() {
-	Log.SetFormatter(&logrus.TextFormatter{
+	logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
 }
@@ -16,30 +16,30 @@ func init() {
 func setLevel(level string) {
 	switch level {
 	case "debug":
-		Log.SetLevel(logrus.DebugLevel)
+		logger.SetLevel(logrus.DebugLevel)
 	case "info":
-		Log.SetLevel(logrus.InfoLevel)
+		logger.SetLevel(logrus.InfoLevel)
 	case "warn":
-		Log.SetLevel(logrus.WarnLevel)
+		logger.SetLevel(logrus.WarnLevel)
 	case "error":
-		Log.SetLevel(logrus.ErrorLevel)
+		logger.SetLevel(logrus.ErrorLevel)
 	default:
-		Log.SetLevel(logrus.InfoLevel)
+		logger.SetLevel(logrus.InfoLevel)
 	}
 }
 
 func debugLog(format string, args ...interface{}) {
-	Log.Debugf(format, args...)
+	logger.Debugf(format, args...)
 }
 
 func infoLog(args ...interface{}) {
-	Log.Info(args...)
+	logger.Info(args...)
 }
 
 func warnLog(args ...interface{}) {
-	Log.Warn(args...)
+	logger.Warn(args...)
 }
 
 func errorLog(args ...interface{}) {
-	Log.Error(args...)
+	logger.Error(args...)
 }

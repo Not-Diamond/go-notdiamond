@@ -2,7 +2,6 @@ package notdiamond
 
 import (
 	"database/sql"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,7 @@ func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 	model := "openai/gpt-4o"
 	metrics, err := newMetricsTracker(":memory:" + t.Name())
 	if err != nil {
-		log.Fatalf("Failed to open database connection: %v", err)
+		logger.Fatalf("Failed to open database connection: %v", err)
 	}
 	// Record several latencies. For example, 1, 2, 3, and 4 seconds.
 	latencies := []float64{1.0, 2.0, 3.0, 4.0} // average = 2.5 seconds
@@ -69,7 +68,7 @@ func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 func TestNewMetricsTracker(t *testing.T) {
 	// Use a temporary directory to isolate database files.
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_new")
 	if err != nil {
@@ -105,7 +104,7 @@ func TestNewMetricsTracker(t *testing.T) {
 // TestRecordLatency verifies that recordLatency inserts a record into the model_metrics table.
 func TestRecordLatency(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_record")
 	if err != nil {
@@ -146,7 +145,7 @@ func TestRecordLatency(t *testing.T) {
 // TestCheckModelHealth_NoRecords verifies that checkModelHealth returns healthy when no records exist.
 func TestCheckModelHealth_NoRecords(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_no_records")
 	if err != nil {
@@ -176,7 +175,7 @@ func TestCheckModelHealth_NoRecords(t *testing.T) {
 // TestCheckModelHealth_UnderThreshold verifies that a model with low recorded latencies is considered healthy.
 func TestCheckModelHealth_UnderThreshold(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_under")
 	if err != nil {
@@ -215,7 +214,7 @@ func TestCheckModelHealth_UnderThreshold(t *testing.T) {
 // TestCheckModelHealth_OverThreshold_NotRecovered verifies that a recent high-latency record makes the model unhealthy.
 func TestCheckModelHealth_OverThreshold_NotRecovered(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_over_not_recovered")
 	if err != nil {
@@ -250,7 +249,7 @@ func TestCheckModelHealth_OverThreshold_NotRecovered(t *testing.T) {
 // TestCheckModelHealth_OverThreshold_Recovered verifies that a record older than the recovery time makes the model healthy.
 func TestCheckModelHealth_OverThreshold_Recovered(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_over_recovered")
 	if err != nil {
@@ -287,7 +286,7 @@ func TestCheckModelHealth_OverThreshold_Recovered(t *testing.T) {
 // TestCheckModelHealth_MaxNoOfCalls verifies that config.NoOfCalls is clamped to 10 when set too high.
 func TestCheckModelHealth_MaxNoOfCalls(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_maxcalls")
 	if err != nil {
@@ -325,7 +324,7 @@ func TestCheckModelHealth_MaxNoOfCalls(t *testing.T) {
 // TestCheckModelHealth_RecoveryTimeClamped verifies that a RecoveryTime above one hour is clamped.
 func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_recovery_clamped")
 	if err != nil {
@@ -377,7 +376,7 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 // TestCloseMetricsTracker verifies that after closing the metrics tracker, operations fail.
 func TestCloseMetricsTracker(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	mt, err := newMetricsTracker("test_metrics_close")
 	if err != nil {
@@ -398,7 +397,7 @@ func TestCloseMetricsTracker(t *testing.T) {
 // TestDropMetricsTracker verifies that dropDB closes the database and removes the underlying file.
 func TestDropMetricsTracker(t *testing.T) {
 	tmpDir := t.TempDir()
-	DataFolder, _ = filepath.Abs(tmpDir)
+	dataFolder, _ = filepath.Abs(tmpDir)
 
 	dbPath := "test_metrics_drop"
 	mt, err := newMetricsTracker(dbPath)

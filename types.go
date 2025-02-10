@@ -22,8 +22,8 @@ func (WeightedModels) isModels() {}
 type clientType string
 
 const (
-	ClientTypeAzure  clientType = "azure"
-	ClientTypeOpenAI clientType = "openai"
+	clientTypeAzure  clientType = "azure"
+	clientTypeOpenai clientType = "openai"
 )
 
 type Config struct {
