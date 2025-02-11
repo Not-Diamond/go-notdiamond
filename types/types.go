@@ -1,11 +1,11 @@
-package notdiamond
+package types
 
 import (
 	"net/http"
 	"time"
 )
 
-type models interface {
+type Models interface {
 	isModels()
 }
 
@@ -22,8 +22,8 @@ func (WeightedModels) isModels() {}
 type clientType string
 
 const (
-	clientTypeAzure  clientType = "azure"
-	clientTypeOpenai clientType = "openai"
+	ClientTypeAzure  clientType = "azure"
+	ClientTypeOpenai clientType = "openai"
 )
 
 type RollingAverageLatency struct {
@@ -34,9 +34,13 @@ type RollingAverageLatency struct {
 
 type ModelLatency map[string]*RollingAverageLatency
 
+type CustomInvalidType struct{}
+
+func (CustomInvalidType) isModels() {}
+
 type Config struct {
 	Clients         []http.Request
-	Models          models
+	Models          Models
 	MaxRetries      map[string]int
 	Timeout         map[string]float64
 	ModelMessages   map[string][]Message

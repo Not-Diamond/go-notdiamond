@@ -12,25 +12,28 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Not-Diamond/go-notdiamond/metric"
+	"github.com/Not-Diamond/go-notdiamond/types"
 )
 
 func TestCombineMessages(t *testing.T) {
 	tests := []struct {
 		name          string
-		modelMessages []Message
-		userMessages  []Message
-		expected      []Message
+		modelMessages []types.Message
+		userMessages  []types.Message
+		expected      []types.Message
 	}{
 		{
 			name: "both model and user messages",
-			modelMessages: []Message{
+			modelMessages: []types.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 			},
-			userMessages: []Message{
+			userMessages: []types.Message{
 				{"role": "user", "content": "Hello"},
 				{"role": "assistant", "content": "Hi there"},
 			},
-			expected: []Message{
+			expected: []types.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 				{"role": "user", "content": "Hello"},
 				{"role": "assistant", "content": "Hi there"},
@@ -38,40 +41,40 @@ func TestCombineMessages(t *testing.T) {
 		},
 		{
 			name:          "empty model messages",
-			modelMessages: []Message{},
-			userMessages: []Message{
+			modelMessages: []types.Message{},
+			userMessages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			expected: []Message{
+			expected: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
 		},
 		{
 			name: "empty user messages",
-			modelMessages: []Message{
+			modelMessages: []types.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 			},
-			userMessages: []Message{},
-			expected: []Message{
+			userMessages: []types.Message{},
+			expected: []types.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 			},
 		},
 		{
 			name:          "both empty messages",
-			modelMessages: []Message{},
-			userMessages:  []Message{},
-			expected:      []Message{},
+			modelMessages: []types.Message{},
+			userMessages:  []types.Message{},
+			expected:      []types.Message{},
 		},
 		{
 			name: "multiple model messages",
-			modelMessages: []Message{
+			modelMessages: []types.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 				{"role": "system", "content": "Respond in English"},
 			},
-			userMessages: []Message{
+			userMessages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			expected: []Message{
+			expected: []types.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 				{"role": "system", "content": "Respond in English"},
 				{"role": "user", "content": "Hello"},
@@ -96,9 +99,9 @@ func TestTryWithRetries(t *testing.T) {
 		maxRetries     map[string]int
 		timeout        map[string]float64
 		backoff        map[string]float64
-		modelMessages  map[string][]Message
-		modelLatency   ModelLatency
-		messages       []Message
+		modelMessages  map[string][]types.Message
+		modelLatency   types.ModelLatency
+		messages       []types.Message
 		setupTransport func() *mockTransport
 		expectedCalls  int
 		expectError    bool
@@ -113,11 +116,11 @@ func TestTryWithRetries(t *testing.T) {
 			timeout: map[string]float64{
 				"openai/gpt-4": 10.0,
 			},
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: ModelLatency{
-				"openai/gpt-4": &RollingAverageLatency{
+			modelLatency: types.ModelLatency{
+				"openai/gpt-4": &types.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -148,11 +151,11 @@ func TestTryWithRetries(t *testing.T) {
 			backoff: map[string]float64{
 				"openai/gpt-4": 0.1,
 			},
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: ModelLatency{
-				"openai/gpt-4": &RollingAverageLatency{
+			modelLatency: types.ModelLatency{
+				"openai/gpt-4": &types.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -189,11 +192,11 @@ func TestTryWithRetries(t *testing.T) {
 			backoff: map[string]float64{
 				"openai/gpt-4": 0.1,
 			},
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: ModelLatency{
-				"openai/gpt-4": &RollingAverageLatency{
+			modelLatency: types.ModelLatency{
+				"openai/gpt-4": &types.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -220,11 +223,11 @@ func TestTryWithRetries(t *testing.T) {
 			timeout: map[string]float64{
 				"openai/gpt-4": 10.0,
 			},
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: ModelLatency{
-				"openai/gpt-4": &RollingAverageLatency{
+			modelLatency: types.ModelLatency{
+				"openai/gpt-4": &types.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -250,13 +253,13 @@ func TestTryWithRetries(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			transport := tt.setupTransport()
 			req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`))
-			metrics, err := newMetricsTracker(":memory:" + tt.name)
+			metrics, err := metric.NewTracker(":memory:" + tt.name)
 			if err != nil {
 				log.Fatalf("Failed to open database connection: %v", err)
 			}
 			httpClient := &NotDiamondHttpClient{
 				Client: &http.Client{Transport: transport},
-				config: &Config{
+				config: types.Config{
 					MaxRetries:    tt.maxRetries,
 					Timeout:       tt.timeout,
 					Backoff:       tt.backoff,
@@ -350,7 +353,7 @@ func TestTryNextModel(t *testing.T) {
 	tests := []struct {
 		name          string
 		modelFull     string
-		messages      []Message
+		messages      []types.Message
 		setupClient   func() (*Client, *mockTransport)
 		expectedURL   string
 		expectedBody  map[string]interface{}
@@ -362,7 +365,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "successful azure request",
 			modelFull: "azure/gpt-4",
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -377,7 +380,7 @@ func TestTryNextModel(t *testing.T) {
 					},
 				}
 
-				metrics, err := newMetricsTracker(":memory:" + "successful_azure_request")
+				metrics, err := metric.NewTracker(":memory:" + "successful_azure_request")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -387,8 +390,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: &Config{
-							ModelMessages: map[string][]Message{
+						config: types.Config{
+							ModelMessages: map[string][]types.Message{
 								"azure/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -414,7 +417,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "successful openai request",
 			modelFull: "openai/gpt-4",
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -428,7 +431,7 @@ func TestTryNextModel(t *testing.T) {
 						},
 					},
 				}
-				metrics, err := newMetricsTracker(":memory:" + "successful_openai_request")
+				metrics, err := metric.NewTracker(":memory:" + "successful_openai_request")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -438,8 +441,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: &Config{
-							ModelMessages: map[string][]Message{
+						config: types.Config{
+							ModelMessages: map[string][]types.Message{
 								"openai/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -464,13 +467,13 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "provider not found",
 			modelFull: "unknown/gpt-4",
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
 				req, _ := http.NewRequest("POST", "https://api.openai.com", nil)
 				transport := &mockTransport{}
-				metrics, err := newMetricsTracker(":memory:" + "provider_not_found")
+				metrics, err := metric.NewTracker(":memory:" + "provider_not_found")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -481,8 +484,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: &Config{
-							ModelMessages: map[string][]Message{
+						config: types.Config{
+							ModelMessages: map[string][]types.Message{
 								"unknown/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -497,7 +500,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "http client error",
 			modelFull: "openai/gpt-4",
-			messages: []Message{
+			messages: []types.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -506,7 +509,7 @@ func TestTryNextModel(t *testing.T) {
 				transport := &mockTransport{
 					errors: []error{fmt.Errorf("network error")},
 				}
-				metrics, err := newMetricsTracker(":memory:" + "http_client_error")
+				metrics, err := metric.NewTracker(":memory:" + "http_client_error")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
@@ -516,8 +519,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: &Config{
-							ModelMessages: map[string][]Message{
+						config: types.Config{
+							ModelMessages: map[string][]types.Message{
 								"openai/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -566,7 +569,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 	tests := []struct {
 		name     string
 		payload  []byte
-		expected []Message
+		expected []types.Message
 	}{
 		{
 			name: "valid messages",
@@ -576,7 +579,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 					{"role": "assistant", "content": "Hi there"}
 				]
 			}`),
-			expected: []Message{
+			expected: []types.Message{
 				{"role": "user", "content": "Hello"},
 				{"role": "assistant", "content": "Hi there"},
 			},
@@ -584,7 +587,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 		{
 			name:     "empty messages array",
 			payload:  []byte(`{"messages": []}`),
-			expected: []Message{},
+			expected: []types.Message{},
 		},
 		{
 			name:     "invalid json",
@@ -834,7 +837,7 @@ func TestGetMaxRetriesForStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &NotDiamondHttpClient{
-				config: &Config{
+				config: types.Config{
 					MaxRetries:      tt.maxRetries,
 					StatusCodeRetry: tt.statusCodeRetry,
 				},
@@ -867,17 +870,17 @@ func TestDo(t *testing.T) {
 						},
 					},
 				}
-				metrics, err := newMetricsTracker(":memory:" + "successful first attempt with ordered models")
+				metrics, err := metric.NewTracker(":memory:" + "successful first attempt with ordered models")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: &Config{
+					config: types.Config{
 						MaxRetries: map[string]int{"openai/gpt-4": 3},
 						Timeout:    map[string]float64{"openai/gpt-4": 30.0},
-						ModelLatency: ModelLatency{
-							"openai/gpt-4": &RollingAverageLatency{
+						ModelLatency: types.ModelLatency{
+							"openai/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           5,               // Max 10
 								RecoveryTime:        5 * time.Minute, // Max 1h
@@ -905,7 +908,7 @@ func TestDo(t *testing.T) {
 			// Create NotDiamondClient and add it to context
 			notDiamondClient := &Client{
 				HttpClient: client,
-				models:     OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				models:     types.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
 				isOrdered:  true,
 			}
 			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
@@ -968,21 +971,21 @@ func TestDoWithLatencies(t *testing.T) {
 					// 5-second delay (recorded latency ~5 seconds)
 					delay: 5 * time.Second,
 				}
-				metrics, err := newMetricsTracker(":memory:" + "successful_first_attempt")
+				metrics, err := metric.NewTracker(":memory:" + "successful_first_attempt")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: &Config{
+					config: types.Config{
 						// Using a window size of 5, so with one record (insufficient) the model is healthy.
-						ModelLatency: ModelLatency{
-							"openai/gpt-4": &RollingAverageLatency{
+						ModelLatency: types.ModelLatency{
+							"openai/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           5,               // window size
 								RecoveryTime:        5 * time.Minute, // recovery period
 							},
-							"azure/gpt-4": &RollingAverageLatency{
+							"azure/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           5,               // window size
 								RecoveryTime:        5 * time.Minute, // recovery period
@@ -1008,21 +1011,21 @@ func TestDoWithLatencies(t *testing.T) {
 					// No response will be used because the unhealthy check fails before sending.
 					delay: 6 * time.Second,
 				}
-				metrics, err := newMetricsTracker(":memory:" + "latency_delay_without_recovery")
+				metrics, err := metric.NewTracker(":memory:" + "latency_delay_without_recovery")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: &Config{
+					config: types.Config{
 						// Set window size to 1 so that the measured latency is used immediately.
-						ModelLatency: ModelLatency{
-							"openai/gpt-4": &RollingAverageLatency{
+						ModelLatency: types.ModelLatency{
+							"openai/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
 							},
-							"azure/gpt-4": &RollingAverageLatency{
+							"azure/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
@@ -1055,21 +1058,21 @@ func TestDoWithLatencies(t *testing.T) {
 					},
 					delay: 6 * time.Second,
 				}
-				metrics, err := newMetricsTracker(":memory:" + "latency_delay_with_recovery")
+				metrics, err := metric.NewTracker(":memory:" + "latency_delay_with_recovery")
 				if err != nil {
 					log.Fatalf("Failed to open database connection: %v", err)
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: &Config{
+					config: types.Config{
 						// Set window size to 1 so that the latency measurement is used directly.
-						ModelLatency: ModelLatency{
-							"openai/gpt-4": &RollingAverageLatency{
+						ModelLatency: types.ModelLatency{
+							"openai/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
 							},
-							"azure/gpt-4": &RollingAverageLatency{
+							"azure/gpt-4": &types.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
@@ -1078,11 +1081,9 @@ func TestDoWithLatencies(t *testing.T) {
 					},
 					metricsTracker: metrics,
 				}
-				// Pre-populate the metrics DB with an old latency record.
-				// This simulates that previous high latency occurred long ago.
-				oldTime := time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)
-				err = metrics.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency, status) VALUES(?, ?, ?, ?)",
-					oldTime, "openai/gpt-4o-mini", 100.0, "success")
+
+				// TODO
+				err = metrics.RecordLatency("openai/gpt-4o-mini", 100.0, "success")
 				if err != nil {
 					log.Fatalf("Failed to insert old latency record: %v", err)
 				}
@@ -1103,7 +1104,7 @@ func TestDoWithLatencies(t *testing.T) {
 			// Create a NotDiamondClient and add it to the context.
 			notDiamondClient := &Client{
 				HttpClient: client,
-				models:     OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				models:     types.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
 				isOrdered:  true,
 			}
 			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)

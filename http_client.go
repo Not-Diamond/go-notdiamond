@@ -6,35 +6,39 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Not-Diamond/go-notdiamond/metric"
+	"github.com/Not-Diamond/go-notdiamond/types"
 )
 
 type NotDiamondHttpClient struct {
 	*http.Client
-	config         *Config
-	metricsTracker *metricsTracker
+	config         types.Config
+	metricsTracker *metric.Tracker
 }
 
-func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
-	metricsTracker, err := newMetricsTracker("metrics")
+func NewNotDiamondHttpClient(config types.Config) (*NotDiamondHttpClient, error) {
+	metricsTracker, err := metric.NewTracker("metrics")
 	if err != nil {
-		errorLog("Failed to create metrics tracker:", err)
+		slog.Error("failed to create metrics tracker", "error", err)
 		return nil, err
 	}
 
 	return &NotDiamondHttpClient{
 		Client:         &http.Client{},
-		config:         &config,
+		config:         config,
 		metricsTracker: metricsTracker,
 	}, nil
 }
 
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
-	infoLog("📡 Executing request: ", req.URL.String())
+	slog.Info("→ Executing request", "url", req.URL.String())
 
 	messages := extractMessagesFromRequest(req)
 	model := extractModelFromRequest(req)
@@ -48,9 +52,9 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 		var modelsToTry []string
 
 		if client.isOrdered {
-			modelsToTry = client.models.(OrderedModels)
+			modelsToTry = client.models.(types.OrderedModels)
 		} else {
-			modelsToTry = getWeightedModelsList(client.models.(WeightedModels))
+			modelsToTry = getWeightedModelsList(client.models.(types.WeightedModels))
 		}
 
 		// Move the requested model to the front of the slice
@@ -68,12 +72,12 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 				return resp, nil
 			} else {
 				lastErr = err
-				errorLog("❌ Attempt failed for model ", modelFull, ": ", err)
+				slog.Error("✕ Attempt failed", "model", modelFull, "error", err.Error())
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("all attempts failed: %v", lastErr)
+	return nil, fmt.Errorf("all requests failed: %v", lastErr)
 }
 
 func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCode int) int {
@@ -100,7 +104,7 @@ func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCo
 	return 1
 }
 
-func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Request, messages []Message, originalCtx context.Context) (*http.Response, error) {
+func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Request, messages []types.Message, originalCtx context.Context) (*http.Response, error) {
 	var lastErr error
 	var lastStatusCode int
 
@@ -110,7 +114,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			break
 		}
 
-		infoLog(fmt.Sprintf("🔄 Attempt %d of %d for model %s", attempt+1, maxRetries, modelFull))
+		slog.Info(fmt.Sprintf("↺ Request %d of %d for model %s", attempt+1, maxRetries, modelFull))
 
 		timeout := 100.0
 		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
@@ -120,11 +124,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		ctx, cancel := context.WithTimeout(originalCtx, time.Duration(timeout*float64(time.Second)))
 		defer cancel()
 
-		_err := c.metricsTracker.checkModelHealth(modelFull, "success", c.config)
+		_err := c.metricsTracker.CheckModelHealth(modelFull, "success", c.config)
 		if _err != nil {
 			cancel()
 			lastErr = _err
-			errorLog(_err)
+			slog.Error(_err.Error())
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
 			}
@@ -149,11 +153,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		if err != nil {
 			cancel()
 			lastErr = err
-			errorLog("⚠️ Request failed ", lastErr)
+			slog.Error("! Request", "failed", lastErr)
 			// Record the latency in SQLite.
-			recErr := c.metricsTracker.recordLatency(modelFull, elapsed, "failed")
+			recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "failed")
 			if recErr != nil {
-				errorLog("Error recording latency:", recErr)
+				slog.Error("error", "recording latency", recErr)
 			}
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
@@ -177,9 +181,9 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			lastStatusCode = resp.StatusCode
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				// Record the latency in SQLite.
-				recErr := c.metricsTracker.recordLatency(modelFull, elapsed, "success")
+				recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "success")
 				if recErr != nil {
-					errorLog("Error recording latency:", recErr)
+					slog.Error("recording latency", "error", recErr)
 				}
 
 				return &http.Response{
@@ -209,7 +213,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					http.StatusText(resp.StatusCode),
 					string(body))
 			}
-			errorLog("⚠️  Request failed ", lastErr)
+			slog.Error("! Request", "failed", lastErr)
 		}
 
 		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
@@ -220,7 +224,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 	return nil, lastErr
 }
 
-func getWeightedModelsList(weights WeightedModels) []string {
+func getWeightedModelsList(weights types.WeightedModels) []string {
 	// Create a slice to store models with their cumulative weights
 	type weightedModel struct {
 		model            string
@@ -276,8 +280,8 @@ func getWeightedModelsList(weights WeightedModels) []string {
 	return result
 }
 
-func combineMessages(modelMessages []Message, userMessages []Message) []Message {
-	combinedMessages := make([]Message, 0)
+func combineMessages(modelMessages []types.Message, userMessages []types.Message) []types.Message {
+	combinedMessages := make([]types.Message, 0)
 	if len(modelMessages) > 0 {
 		combinedMessages = append(combinedMessages, modelMessages...)
 	}
@@ -285,7 +289,7 @@ func combineMessages(modelMessages []Message, userMessages []Message) []Message 
 	return combinedMessages
 }
 
-func tryNextModel(client *Client, modelFull string, messages []Message, ctx context.Context) (*http.Response, error) {
+func tryNextModel(client *Client, modelFull string, messages []types.Message, ctx context.Context) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
 	nextProvider, nextModel := parts[0], parts[1]
 
@@ -294,13 +298,13 @@ func tryNextModel(client *Client, modelFull string, messages []Message, ctx cont
 	for _, clientReq := range client.clients {
 		if strings.Contains(clientReq.URL.String(), nextProvider) {
 			nextReq = clientReq.Clone(ctx)
-			infoLog("↪️  Fallback to model:", modelFull, "| URL:", nextReq.URL.String())
+			slog.Info("↝ Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
 			break
 		}
 	}
 
 	if nextReq == nil {
-		infoLog("⚠️ No more fallbacks available for model:", modelFull)
+		slog.Info("! No more fallbacks available for", "model:", modelFull)
 		return nil, fmt.Errorf("no client found for provider %s", nextProvider)
 	}
 
@@ -367,7 +371,7 @@ func extractProviderFromRequest(req *http.Request) string {
 	return ""
 }
 
-func extractMessagesFromRequest(req *http.Request) []Message {
+func extractMessagesFromRequest(req *http.Request) []types.Message {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil
@@ -376,7 +380,7 @@ func extractMessagesFromRequest(req *http.Request) []Message {
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var payload struct {
-		Messages []Message `json:"messages"`
+		Messages []types.Message `json:"messages"`
 	}
 	err = json.Unmarshal(body, &payload)
 	if err != nil {

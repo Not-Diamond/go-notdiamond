@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	test_weighted "main/manual-test-cases/weighted_models"
-	"main/openai"
 	"net/http"
 	"time"
 
-	"notdiamond"
+	"github.com/Not-Diamond/go-notdiamond"
+	"github.com/Not-Diamond/go-notdiamond/types"
+
+	"example/openai"
 )
 
 func main() {
@@ -30,28 +31,32 @@ func main() {
 		log.Fatalf("Failed to create azure request: %v", err)
 	}
 
-	config := test_weighted.WeightedModels
-
-	config.Clients = []http.Request{
-		*openaiRequest,
-		*azureRequest,
-	}
-
-	config.ModelLatency = notdiamond.ModelLatency{
-		"openai/gpt-4o-mini": &notdiamond.RollingAverageLatency{
-			AvgLatencyThreshold: 3.5,
-			NoOfCalls:           5,               // Max 10
-			RecoveryTime:        5 * time.Minute, // Max 1h
+	config := types.Config{
+		Clients: []http.Request{
+			*openaiRequest,
+			*azureRequest,
 		},
-		"azure/gpt-4o": &notdiamond.RollingAverageLatency{
-			AvgLatencyThreshold: 3.2,
-			NoOfCalls:           10,              // Max 10
-			RecoveryTime:        3 * time.Second, // Max 1h
+		Models: types.WeightedModels{
+			"openai/gpt-4o-mini": 0.4,
+			"azure/gpt-4o-mini":  0.4,
+			"azure/gpt-4o":       0.2,
 		},
-		"azure/gpt-4o-mini": &notdiamond.RollingAverageLatency{
-			AvgLatencyThreshold: 6,
-			NoOfCalls:           10,              // Max 10
-			RecoveryTime:        1 * time.Minute, // Max 1h
+		ModelLatency: types.ModelLatency{
+			"openai/gpt-4o-mini": &types.RollingAverageLatency{
+				AvgLatencyThreshold: 3.5,
+				NoOfCalls:           5,
+				RecoveryTime:        5 * time.Minute,
+			},
+			"azure/gpt-4o": &types.RollingAverageLatency{
+				AvgLatencyThreshold: 3.2,
+				NoOfCalls:           10,
+				RecoveryTime:        3 * time.Second,
+			},
+			"azure/gpt-4o-mini": &types.RollingAverageLatency{
+				AvgLatencyThreshold: 6,
+				NoOfCalls:           10,
+				RecoveryTime:        1 * time.Minute,
+			},
 		},
 	}
 
