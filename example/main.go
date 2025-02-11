@@ -14,17 +14,6 @@ import (
 	"notdiamond"
 )
 
-func NewOpenAIRequest(url string, apiKey string) (*http.Request, error) {
-	req, err := http.NewRequest("POST", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", apiKey)
-
-	return req, nil
-}
 func GetEnvVariable(key string) string {
 	err := godotenv.Load(".env")
 
@@ -35,16 +24,27 @@ func GetEnvVariable(key string) string {
 	return os.Getenv(key)
 }
 
+func NewRequest(url string, apiKey string) (*http.Request, error) {
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", apiKey)
+
+	return req, nil
+}
 func main() {
 	openaiApiKey := GetEnvVariable("OPENAI_API_KEY")
 	azureApiKey := GetEnvVariable("AZURE_API_KEY")
 	azureEndpoint := GetEnvVariable("AZURE_ENDPOINT")
 
-	openaiRequest, err := NewOpenAIRequest("https://api.openai.com/v1/chat/completions", openaiApiKey)
+	openaiRequest, err := NewRequest("https://api.openai.com/v1/chat/completions", openaiApiKey)
 	if err != nil {
 		log.Fatalf("Failed to create openai request: %v", err)
 	}
-	azureRequest, err := NewOpenAIRequest(azureEndpoint, azureApiKey)
+	azureRequest, err := NewRequest(azureEndpoint, azureApiKey)
 	if err != nil {
 		log.Fatalf("Failed to create azure request: %v", err)
 	}
@@ -66,9 +66,9 @@ func main() {
 			"azure/gpt-4o",
 		},
 		MaxRetries: map[string]int{
-			"openai/gpt-4o-mini": 2,
-			"azure/gpt-4o-mini":  2,
-			"azure/gpt-4o":       2,
+			"openai/gpt-4o-mini": 5,
+			"azure/gpt-4o-mini":  3,
+			"azure/gpt-4o":       4,
 		},
 		Timeout: map[string]float64{
 			"azure/gpt-4o-mini":  10,
@@ -93,17 +93,17 @@ func main() {
 		},
 		ModelLatency: notdiamond.ModelLatency{
 			"openai/gpt-4o-mini": &notdiamond.RollingAverageLatency{
-				AvgLatencyThreshold: 0.002,
-				NoOfCalls:           5,                // Max 10
-				RecoveryTime:        30 * time.Second, // Max 1h
+				AvgLatencyThreshold: 3.5,
+				NoOfCalls:           5,               // Max 10
+				RecoveryTime:        5 * time.Minute, // Max 1h
 			},
 			"azure/gpt-4o": &notdiamond.RollingAverageLatency{
-				AvgLatencyThreshold: 0.5,
+				AvgLatencyThreshold: 3.2,
 				NoOfCalls:           10,              // Max 10
 				RecoveryTime:        3 * time.Second, // Max 1h
 			},
 			"azure/gpt-4o-mini": &notdiamond.RollingAverageLatency{
-				AvgLatencyThreshold: 0.1,
+				AvgLatencyThreshold: 6,
 				NoOfCalls:           10,              // Max 10
 				RecoveryTime:        1 * time.Minute, // Max 1h
 			},

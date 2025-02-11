@@ -20,6 +20,20 @@ type NotDiamondHttpClient struct {
 	metricsTracker *metricsTracker
 }
 
+// slowRoundTripper is a custom RoundTripper that delays each request.
+type slowRoundTripper struct {
+	delay time.Duration
+	rt    http.RoundTripper
+}
+
+// RoundTrip delays the request and then calls the underlying RoundTripper.
+func (s *slowRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Introduce an artificial delay.
+	time.Sleep(s.delay)
+	// Forward the request.
+	return s.rt.RoundTrip(req)
+}
+
 func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
 	metricsTracker, err := newMetricsTracker("metrics")
 	if err != nil {
@@ -28,7 +42,12 @@ func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
 	}
 
 	return &NotDiamondHttpClient{
-		Client:         &http.Client{},
+		Client: &http.Client{
+			Transport: &slowRoundTripper{
+				delay: 5 * time.Second, // Delay each request by 5 seconds.
+				rt:    http.DefaultTransport,
+			},
+		},
 		config:         &config,
 		metricsTracker: metricsTracker,
 	}, nil
@@ -133,14 +152,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		ctx, cancel := context.WithTimeout(originalCtx, time.Duration(timeout*float64(time.Second)))
 		defer cancel()
 
-		healthy, _err := c.metricsTracker.checkModelHealth(reqID, modelFull, "Request Failed From Host", c.config)
+		_err := c.metricsTracker.checkModelHealth(reqID, modelFull, "success", c.config)
 		if _err != nil {
-			errorLog("Error checking model health:", _err)
-		}
-		if !healthy {
 			cancel()
 			lastErr = _err
-			errorLog("model %s is unhealthy (average latency too high)", modelFull)
+			errorLog(_err)
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
 			}

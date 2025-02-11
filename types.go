@@ -33,6 +33,7 @@ type RollingAverageLatency struct {
 }
 
 type ModelLatency map[string]*RollingAverageLatency
+
 type Config struct {
 	Clients         []http.Request
 	Models          models

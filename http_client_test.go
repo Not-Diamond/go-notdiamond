@@ -909,12 +909,28 @@ func TestDo(t *testing.T) {
 	}
 }
 
+// slowRoundTripper is a custom RoundTripper that delays each request.
+type slowRoundTripperTest struct {
+	delay time.Duration
+	rt    *mockTransport
+}
+
+// RoundTrip delays the request and then calls the underlying RoundTripper.
+func (s *slowRoundTripperTest) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Introduce an artificial delay.
+	time.Sleep(s.delay)
+	// Forward the request.
+	return s.rt.RoundTrip(req)
+}
+
 type mockTransport struct {
 	responses   []*http.Response
 	errors      []error
 	lastRequest *http.Request
 	callCount   int
 	currentIdx  int
+	delay       time.Duration
+	rt          http.RoundTripper
 }
 
 func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -935,6 +951,11 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		m.currentIdx++
 		return resp, err
 	}
+
+	// Introduce an artificial delay.
+	time.Sleep(m.delay)
+	// Forward the request.
+	return m.rt.RoundTrip(req)
 
 	// Default case: return the last configured response/error
 	if len(m.responses) > 0 {
