@@ -91,12 +91,7 @@ func (d *database) getColumns(table string) ([]string, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "getColumns executeQuery")
 	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			errorLog(err)
-		}
-	}(rows)
+	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -113,12 +108,7 @@ func (d *database) getJSON(tableName, key string, v interface{}) error {
 	if err != nil {
 		return errors.Wrap(err, "getJSON Prepare")
 	}
-	defer func(stmt *sql.Stmt) {
-		err := stmt.Close()
-		if err != nil {
-			errorLog(err)
-		}
-	}(stmt)
+	defer stmt.Close()
 
 	var result string
 	if err := stmt.QueryRow(key).Scan(&result); err != nil {
@@ -151,12 +141,7 @@ func (d *database) setJSON(tableName, key string, value interface{}) error {
 		}
 		return errors.Wrap(err, "setJSON Prepare")
 	}
-	defer func(stmt *sql.Stmt) {
-		err := stmt.Close()
-		if err != nil {
-			errorLog(err)
-		}
-	}(stmt)
+	defer stmt.Close()
 
 	if _, err := stmt.Exec(key, string(b)); err != nil {
 		err := tx.Rollback()
@@ -185,12 +170,7 @@ func (d *database) deleteItem(tableName, key string) error {
 		}
 		return errors.Wrap(err, "deleteItem Prepare")
 	}
-	defer func(stmt *sql.Stmt) {
-		err := stmt.Close()
-		if err != nil {
-			errorLog(err)
-		}
-	}(stmt)
+	defer stmt.Close()
 
 	if _, err := stmt.Exec(key); err != nil {
 		err := tx.Rollback()
@@ -322,9 +302,15 @@ func (d *database) closeConnection() error {
 
 // executeQuery executes a query that returns rows (e.g. SELECT).
 func (d *database) executeQuery(query string, args ...interface{}) (*sql.Rows, error) {
-	rows, err := d.db.Query(query, args...)
+	stmt, err := d.db.Prepare(query)
 	if err != nil {
-		return nil, errors.Wrap(err, "executeQuery")
+		return nil, errors.Wrap(err, query)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query(args...)
+	if err != nil {
+		return nil, errors.Wrap(err, query)
 	}
 	return rows, nil
 }

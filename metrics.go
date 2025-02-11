@@ -1,13 +1,15 @@
 package notdiamond
 
 import (
-	"database/sql"
+	"fmt"
+	"github.com/pkg/errors"
 	"time"
 )
 
 // metricsTracker manages a SQLite database that records call latencies per model.
 type metricsTracker struct {
-	db *database
+	db    *database
+	debug bool
 }
 
 // newMetricsTracker initializes the SQLite database (stored in the file given by dbPath)
@@ -19,9 +21,10 @@ func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 	}
 
 	// Create the table if it does not exist.
-	err = db.makeTables(true, "model_metrics", map[string]string{
+	err = db.makeTables(true, "model_metrics", Message{
 		"model":   "TEXT",
 		"latency": "REAL",
+		"status":  "TEXT",
 	})
 	if err != nil {
 		return nil, err
@@ -31,82 +34,116 @@ func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 }
 
 // recordLatency records a call's latency for a given model.
-func (mt *metricsTracker) recordLatency(model string, latency float64) error {
-	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency) VALUES(?, ?, ?)",
-		time.Now().UTC(), model, latency)
+func (mt *metricsTracker) recordLatency(model string, latency float64, status string) error {
+	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency, status) VALUES(?, ?, ?, ?)",
+		time.Now().UTC(), model, latency, status)
 	return err
+}
+
+// recordRecoveryTime records the recovery time for a given model.
+func (mt *metricsTracker) recordRecoveryTime(model string) error {
+	return mt.db.setJSON("keystore", model, time.Now().UTC())
+}
+
+func (mt *metricsTracker) checkRecoveryTime(model string, config *Config) error {
+	var latestTime time.Time
+
+	err := mt.db.getJSON("keystore", model, &latestTime)
+	if err != nil {
+
+	}
+
+	if time.Since(latestTime) < config.ModelLatency[model].RecoveryTime {
+		return errors.Errorf("Model hasn't recover yet, skipping")
+	}
+
+	return nil
 }
 
 // checkModelHealth returns true if the model is healthy (i.e. its average latency over the last
 // noOfCalls does not exceed avgLatency threshold). If the model is unhealthy, it is considered “blacklisted”
 // until recoveryTime has elapsed since the last call that exceeded the threshold.
-func (mt *metricsTracker) checkModelHealth(model string, config *Config) (bool, error) {
-	if config.NoOfCalls > 10 {
-		config.NoOfCalls = 10 // Enforce maximum
+func (mt *metricsTracker) checkModelHealth(model string, status string, config *Config) error {
+	if config.ModelLatency[model].NoOfCalls > 10 {
+		config.ModelLatency[model].NoOfCalls = 10 // Enforce maximum
 	}
-	if config.RecoveryTime > time.Hour {
-		config.RecoveryTime = time.Hour // Enforce maximum
+	if config.ModelLatency[model].RecoveryTime > time.Hour {
+		config.ModelLatency[model].RecoveryTime = time.Hour // Enforce maximum
 	}
 
 	// executeQuery the most recent noOfCalls calls for the model.
-	query := `
+	raw_query := `
 	SELECT timestamp, latency FROM model_metrics
-	WHERE model = ?
+	WHERE model = '%s' and status LIKE '%%' || '%s' || '%%'
 	ORDER BY timestamp DESC
-	LIMIT ?;
+	LIMIT %d;
 	`
-	rows, err := mt.db.executeQuery(query, model, config.NoOfCalls)
+	query := fmt.Sprintf(raw_query, model, status, config.ModelLatency[model].NoOfCalls)
+	rows, err := mt.db.executeQuery(query)
 	if err != nil {
-		return false, err
+		return err
 	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			// logger error but don't return it.
-			errorLog("Failed to close rows:", err)
-		}
-	}(rows)
+	defer rows.Close()
 
-	var totalLatency float64
-	var count int
-	var latestTime time.Time
+	// Create a new Statistics instance to accumulate data.
+	stats := newStatistics()
 
 	for rows.Next() {
 		var ts string
 		var latency float64
 		if err := rows.Scan(&ts, &latency); err != nil {
-			return false, err
+			return err
 		}
+		// Parse the timestamp.
 		t, err := time.Parse(time.RFC3339Nano, ts)
 		if err != nil {
-			// Fallback: try to parse with time.RFC3339
+			// Fallback: try RFC3339
 			t, err = time.Parse(time.RFC3339, ts)
 			if err != nil {
-				return false, err
+				return errors.Wrap(err, "CheckModelHealth parse time")
 			}
 		}
-		if count == 0 {
-			latestTime = t
-		}
-		totalLatency += latency
-		count++
+		stats.add(t, latency)
 	}
 
-	// If there are not enough records, consider the model healthy.
-	if count == 0 {
-		return true, nil
+	if err := rows.Err(); err != nil {
+		return errors.Wrap(err, "getting rows error")
 	}
 
-	average := totalLatency / float64(count)
-	if average > config.AvgLatencyThreshold {
-		// Check if recovery_time has elapsed since the most recent call.
-		if time.Since(latestTime) < config.RecoveryTime {
-			// Model is unhealthy.
-			return false, nil
-		}
-		// Recovery time elapsed: consider the model healthy.
+	// If there are not enough data points, assume model is healthy.
+	if len(stats.data) < config.ModelLatency[model].NoOfCalls {
+		infoLog(fmt.Sprintf("Not enough data points for model %s, skipping health check", model))
+		return nil
 	}
-	return true, nil
+
+	// Our query returned data in descending order (most recent first).
+	// Reverse the slice so that data is in ascending order (oldest first)
+	for i, j := 0, len(stats.data)-1; i < j; i, j = i+1, j-1 {
+		stats.data[i], stats.data[j] = stats.data[j], stats.data[i]
+	}
+
+	// Compute the moving average with a window equal to config.NoOfCalls.
+	movingAverages, err := stats.movingAverage(config.ModelLatency[model].NoOfCalls)
+	if err != nil {
+		return err
+	}
+	// The last element is the moving average for the most recent window.
+	latestMovingAvg := movingAverages[len(movingAverages)-1]
+
+	// If the latest moving average exceeds the threshold, check the recovery time.
+	if latestMovingAvg > config.ModelLatency[model].AvgLatencyThreshold {
+		// Use the timestamp of the most recent record (now at the end after reversal)
+		latestTimestamp := stats.data[len(stats.data)-1].timestamp
+		if time.Since(latestTimestamp) < config.ModelLatency[model].RecoveryTime {
+			// High moving average and recent data: model is unhealthy.
+			return errors.Errorf("High moving average and recent data: model is unhealthy.")
+		} else {
+			infoLog(fmt.Sprintf("Model %s has recovered, but moving average: %.2f is above threshold: %.2f", model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold))
+		}
+	}
+	// Otherwise, the model is healthy.
+	infoLog(fmt.Sprintf("Model %s is healthy, moving average: %.2f is below threshold: %.2f", model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold))
+	return nil
 }
 
 // close closes the underlying database connection.

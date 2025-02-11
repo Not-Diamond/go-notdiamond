@@ -37,6 +37,24 @@ func main() {
 		*azureRequest,
 	}
 
+	config.ModelLatency = notdiamond.ModelLatency{
+		"openai/gpt-4o-mini": &notdiamond.RollingAverageLatency{
+			AvgLatencyThreshold: 3.5,
+			NoOfCalls:           5,               // Max 10
+			RecoveryTime:        5 * time.Minute, // Max 1h
+		},
+		"azure/gpt-4o": &notdiamond.RollingAverageLatency{
+			AvgLatencyThreshold: 3.2,
+			NoOfCalls:           10,              // Max 10
+			RecoveryTime:        3 * time.Second, // Max 1h
+		},
+		"azure/gpt-4o-mini": &notdiamond.RollingAverageLatency{
+			AvgLatencyThreshold: 6,
+			NoOfCalls:           10,              // Max 10
+			RecoveryTime:        1 * time.Minute, // Max 1h
+		},
+	}
+
 	notdiamondClient, err := notdiamond.Init(config)
 	if err != nil {
 		log.Fatalf("Failed to initialize notdiamond: %v", err)
@@ -56,7 +74,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionsdssss", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
@@ -65,6 +83,7 @@ func main() {
 	req.Header.Set("Authorization", "Bearer "+openaiApiKey)
 
 	startTime := time.Now()
+
 	resp, err := notdiamondClient.Do(req)
 
 	if err != nil {

@@ -1,10 +1,9 @@
 package main
 
 import (
+	"github.com/joho/godotenv"
 	"log"
 	"os"
-
-	"github.com/joho/godotenv"
 )
 
 func GetEnvVariable(key string) string {
