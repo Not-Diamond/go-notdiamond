@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/validation"
 )
 
 type Client struct {
 	clients        []http.Request
-	models         models
+	models         types.Models
 	modelProviders map[string]map[string]bool
 	isOrdered      bool
 	HttpClient     *NotDiamondHttpClient
@@ -20,16 +24,16 @@ type contextKey string
 
 const clientKey contextKey = "notdiamondClient"
 
-func Init(config Config) (*Client, error) {
-	infoLog("⚡ Initializing Client...")
+func Init(config types.Config) (*Client, error) {
+	slog.Info("▷ Initializing Client...")
 
-	if err := validateConfig(config); err != nil {
-		errorLog("Config validation failed:", err)
+	if err := validation.ValidateConfig(config); err != nil {
+		slog.Error("validation", "error", err.Error())
 		return nil, err
 	}
 
 	isOrdered := false
-	if _, ok := config.Models.(OrderedModels); ok {
+	if _, ok := config.Models.(types.OrderedModels); ok {
 		isOrdered = true
 	}
 
@@ -37,7 +41,7 @@ func Init(config Config) (*Client, error) {
 	modelProviders := make(map[string]map[string]bool)
 
 	switch models := config.Models.(type) {
-	case WeightedModels:
+	case types.WeightedModels:
 		for modelFull := range models {
 			parts := strings.Split(modelFull, "/")
 			provider, model := parts[0], parts[1]
@@ -47,7 +51,7 @@ func Init(config Config) (*Client, error) {
 			}
 			modelProviders[model][provider] = true
 		}
-	case OrderedModels:
+	case types.OrderedModels:
 		for _, modelFull := range models {
 			parts := strings.Split(modelFull, "/")
 			provider, model := parts[0], parts[1]

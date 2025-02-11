@@ -1,4 +1,4 @@
-package notdiamond
+package validation
 
 import (
 	"net/http"
@@ -6,24 +6,21 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/Not-Diamond/go-notdiamond/types"
 )
-
-// CustomInvalidType is used to test type assertion failures
-type CustomInvalidType struct{}
-
-func (CustomInvalidType) isModels() {}
 
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  Config
+		config  types.Config
 		wantErr bool
 	}{
 		{
 			name: "valid config with ordered models",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{*&http.Request{}},
-				Models: OrderedModels{
+				Models: types.OrderedModels{
 					"openai/gpt-4",
 					"azure/gpt-4",
 				},
@@ -32,9 +29,9 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with weighted models",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{*&http.Request{}},
-				Models: WeightedModels{
+				Models: types.WeightedModels{
 					"openai/gpt-4": 0.6,
 					"azure/gpt-4":  0.4,
 				},
@@ -43,23 +40,23 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "invalid - no clients",
-			config: Config{
-				Models: OrderedModels{"openai/gpt-4"},
+			config: types.Config{
+				Models: types.OrderedModels{"openai/gpt-4"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid - no models",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{*&http.Request{}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid - wrong model type",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{*&http.Request{}},
-				Models:  CustomInvalidType{}, // Using custom type to force type assertion failure
+				Models:  types.CustomInvalidType{},
 			},
 			wantErr: true,
 		},
@@ -67,7 +64,7 @@ func TestValidateConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateConfig(tt.config)
+			err := ValidateConfig(tt.config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -616,12 +613,12 @@ func TestValidateModels(t *testing.T) {
 	}{
 		{
 			name:    "valid ordered models",
-			models:  OrderedModels{"openai/gpt-4"},
+			models:  types.OrderedModels{"openai/gpt-4"},
 			wantErr: false,
 		},
 		{
 			name: "valid weighted models",
-			models: WeightedModels{
+			models: types.WeightedModels{
 				"openai/gpt-4": 1.0,
 			},
 			wantErr: false,

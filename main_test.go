@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/Not-Diamond/go-notdiamond/database"
 )
 
 func TestMain(m *testing.M) {
@@ -19,7 +21,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// setJSON the global dataFolder for the innerDB package.
-	dataFolder = tmpDir
+	database.DataFolder = tmpDir
 
 	// Run tests
 	code := m.Run()

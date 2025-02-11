@@ -3,21 +3,24 @@ package notdiamond
 import (
 	"net/http"
 	"testing"
+
+	"github.com/Not-Diamond/go-notdiamond/database"
+	"github.com/Not-Diamond/go-notdiamond/types"
 )
 
 func TestInit(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  Config
+		config  types.Config
 		wantErr bool
 	}{
 		{
 			name: "valid ordered models config",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: OrderedModels{
+				Models: types.OrderedModels{
 					"openai/gpt-4",
 					"azure/gpt-4",
 				},
@@ -34,11 +37,11 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "valid weighted models config",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: WeightedModels{
+				Models: types.WeightedModels{
 					"openai/gpt-4": 0.6,
 					"azure/gpt-4":  0.4,
 				},
@@ -55,8 +58,8 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - no clients",
-			config: Config{
-				Models: OrderedModels{
+			config: types.Config{
+				Models: types.OrderedModels{
 					"openai/gpt-4",
 				},
 			},
@@ -64,7 +67,7 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - no models",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
@@ -73,11 +76,11 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - incorrect model format",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: OrderedModels{
+				Models: types.OrderedModels{
 					"invalid-model-format",
 				},
 			},
@@ -85,11 +88,11 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - unknown provider",
-			config: Config{
+			config: types.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: OrderedModels{
+				Models: types.OrderedModels{
 					"unknown/gpt-4",
 				},
 			},
@@ -100,7 +103,7 @@ func TestInit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use a temporary directory for the database files so that each test is isolated.
-			dataFolder = t.TempDir()
+			database.DataFolder = t.TempDir()
 
 			client, err := Init(tt.config)
 			if (err != nil) != tt.wantErr {
@@ -109,7 +112,7 @@ func TestInit(t *testing.T) {
 
 			// If the client was successfully created, make sure to clean up its resources.
 			if client != nil && client.HttpClient != nil && client.HttpClient.metricsTracker != nil {
-				if cerr := client.HttpClient.metricsTracker.close(); cerr != nil {
+				if cerr := client.HttpClient.metricsTracker.Close(); cerr != nil {
 					t.Errorf("failed to close metrics tracker: %v", cerr)
 				}
 			}
