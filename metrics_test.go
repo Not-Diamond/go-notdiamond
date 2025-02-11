@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+func must(t *testing.T, err error) {
+	if err != nil {
+		t.Error(err)
+	}
+}
+
 // setupTempDB sets the innerDB.DataFolder to a unique temporary directory for the test.
 func setupTempDB(t *testing.T) {
 	t.Helper()

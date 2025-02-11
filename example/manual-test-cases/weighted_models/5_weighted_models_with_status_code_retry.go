@@ -1,0 +1,28 @@
+package test_weighted
+
+import (
+	"notdiamond"
+)
+
+var WeightedModelsWithStatusCodeRetry = notdiamond.Config{
+	Models: notdiamond.WeightedModels{
+		"azure/gpt-4o-mini":  0.1,
+		"openai/gpt-4o-mini": 0.1,
+		"openai/gpt-4o":      0.7,
+		"azure/gpt-4o":       0.1,
+	},
+	StatusCodeRetry: map[string]map[string]int{
+		"openai/gpt-4o-mini": {
+			"401": 1,
+		},
+		"azure/gpt-4o-mini": {
+			"401": 2,
+		},
+		"azure/gpt-4o": {
+			"401": 1,
+		},
+		"openai/gpt-4o": {
+			"401": 1,
+		},
+	},
+}
