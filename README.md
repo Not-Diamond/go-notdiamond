@@ -31,21 +31,26 @@ azureApiKey := ''
 azureEndpoint := ''
 
 // Create requests
-openaiRequest := NewOpenAIRequest("https://api.openai.com/v1/chat/completions", openaiApiKey)
-azureRequest := NewOpenAIRequest(azureEndpoint, azureApiKey)
+openaiRequest := NewRequest("https://api.openai.com/v1/chat/completions", openaiApiKey)
+azureRequest := NewRequest(azureEndpoint, azureApiKey)
 
 // Create config
 config := notdiamond.Config{
-	Clients: []http.Request{ *openaiRequest, *azureRequest },
-	Models:  notdiamond.OrderedModels{ "azure/gpt-4o-mini", "openai/gpt-4o-mini" },
+	Clients: []http.Request{ openaiRequest, azureRequest },
+	Models: notdiamond.OrderedModels{ "azure/gpt-4o-mini", "openai/gpt-4o-mini" },
 	MaxRetries: map[string]int{
-		"azure/gpt-4o-mini":  2,
+		"azure/gpt-4o-mini": 2,
 		"openai/gpt-4o-mini": 2,
 	},
 }
 
-// Initialize client
-notdiamondClient := notdiamond.Init(config)
+// Create transport
+transport, err := notdiamond.NewTransport(config)
+
+// Create a standard http.Client with our transport
+client := &http.Client{
+Transport: transport,
+}
 
 // Prepare Payload
 messages := []map[string]string{ {"role": "user", "content": "Hello, how are you?"} }
@@ -57,8 +62,8 @@ req := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", byt
 req.Header.Set("Content-Type", "application/json")
 req.Header.Set("Authorization", "Bearer "+openaiApiKey)
 
-// Do request via notdiamondClient, not httpClient
-resp := notdiamondClient.Do(req)
+// Do request via standard http.Client with our transport
+resp := client.Do(req)
 defer resp.Body.Close()
 body := io.ReadAll(resp.Body)
 
@@ -164,5 +169,14 @@ config := notdiamond.Config{
 Configure custom average rolling latency threshold and recovery time for each model:
 
 ```go
-// TODO: Add example
+config := notdiamond.Config{
+	// ... other config ...
+	ModelLatency: map[string]notdiamond.RollingAverageLatency{
+		"azure/gpt-4": {
+			Threshold: 0.5,
+			RecoveryTime: 1 * time.Minute,
+			NoOfCalls: 5,
+		},
+	},
+}
 ```

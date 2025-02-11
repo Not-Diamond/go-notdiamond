@@ -43,9 +43,9 @@ func main() {
 		},
 		ModelLatency: types.ModelLatency{
 			"openai/gpt-4o-mini": &types.RollingAverageLatency{
-				AvgLatencyThreshold: 3.5,
+				AvgLatencyThreshold: 0.5,
 				NoOfCalls:           5,
-				RecoveryTime:        5 * time.Minute,
+				RecoveryTime:        1 * time.Minute,
 			},
 			"azure/gpt-4o": &types.RollingAverageLatency{
 				AvgLatencyThreshold: 3.2,
@@ -60,9 +60,13 @@ func main() {
 		},
 	}
 
-	notdiamondClient, err := notdiamond.Init(config)
+	transport, err := notdiamond.NewTransport(config)
 	if err != nil {
-		log.Fatalf("Failed to initialize notdiamond: %v", err)
+		log.Fatalf("Failed to create transport: %v", err)
+	}
+
+	client := &http.Client{
+		Transport: transport,
 	}
 
 	messages := []map[string]string{
@@ -79,7 +83,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionsdssss", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
@@ -89,8 +93,7 @@ func main() {
 
 	startTime := time.Now()
 
-	resp, err := notdiamondClient.Do(req)
-
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatalf("Failed to do request: %v", err)
 	}
