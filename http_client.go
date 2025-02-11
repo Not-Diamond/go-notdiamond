@@ -68,7 +68,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 				return resp, nil
 			} else {
 				lastErr = err
-				errorLog("Attempt failed for model ", modelFull, ": ", err)
+				errorLog("❌ Attempt failed for model ", modelFull, ": ", err)
 			}
 		}
 	}
@@ -112,7 +112,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 		infoLog(fmt.Sprintf("🔄 Attempt %d of %d for model %s", attempt+1, maxRetries, modelFull))
 
-		timeout := 30.0
+		timeout := 100.0
 		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
 			timeout = t
 		}
@@ -154,7 +154,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		if err != nil {
 			cancel()
 			lastErr = err
-			errorLog("❌ Request failed ", lastErr)
+			errorLog("⚠️ Request failed ", lastErr)
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
 			}
@@ -203,7 +203,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					http.StatusText(resp.StatusCode),
 					string(body))
 			}
-			errorLog("❌ Request failed ", lastErr)
+			errorLog("⚠️  Request failed ", lastErr)
 		}
 
 		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
@@ -288,7 +288,7 @@ func tryNextModel(client *Client, modelFull string, messages []Message, ctx cont
 	for _, clientReq := range client.clients {
 		if strings.Contains(clientReq.URL.String(), nextProvider) {
 			nextReq = clientReq.Clone(ctx)
-			infoLog("⚠️  Fallback to model:", modelFull, "| URL:", nextReq.URL.String())
+			infoLog("↪️  Fallback to model:", modelFull, "| URL:", nextReq.URL.String())
 			break
 		}
 	}
@@ -332,11 +332,15 @@ func tryNextModel(client *Client, modelFull string, messages []Message, ctx cont
 }
 
 func extractModelFromRequest(req *http.Request) string {
-	body, _ := io.ReadAll(req.Body)
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return ""
+	}
+
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var payload map[string]interface{}
-	err := json.Unmarshal(body, &payload)
+	err = json.Unmarshal(body, &payload)
 	if err != nil {
 		return ""
 	}
@@ -358,13 +362,17 @@ func extractProviderFromRequest(req *http.Request) string {
 }
 
 func extractMessagesFromRequest(req *http.Request) []Message {
-	body, _ := io.ReadAll(req.Body)
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil
+	}
+
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var payload struct {
 		Messages []Message `json:"messages"`
 	}
-	err := json.Unmarshal(body, &payload)
+	err = json.Unmarshal(body, &payload)
 	if err != nil {
 		return nil
 	}

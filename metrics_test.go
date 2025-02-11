@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+func must(t *testing.T, err error) {
+	if err != nil {
+		t.Error(err)
+	}
+}
+
 func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 
 	model := "openai/gpt-4o"
