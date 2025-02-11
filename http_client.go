@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"io"
 	"math/rand"
 	"net/http"
@@ -20,20 +19,6 @@ type NotDiamondHttpClient struct {
 	metricsTracker *metricsTracker
 }
 
-// slowRoundTripper is a custom RoundTripper that delays each request.
-type slowRoundTripper struct {
-	delay time.Duration
-	rt    http.RoundTripper
-}
-
-// RoundTrip delays the request and then calls the underlying RoundTripper.
-func (s *slowRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Introduce an artificial delay.
-	time.Sleep(s.delay)
-	// Forward the request.
-	return s.rt.RoundTrip(req)
-}
-
 func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
 	metricsTracker, err := newMetricsTracker("metrics")
 	if err != nil {
@@ -42,12 +27,7 @@ func NewNotDiamondHttpClient(config Config) (*NotDiamondHttpClient, error) {
 	}
 
 	return &NotDiamondHttpClient{
-		Client: &http.Client{
-			Transport: &slowRoundTripper{
-				delay: 5 * time.Second, // Delay each request by 5 seconds.
-				rt:    http.DefaultTransport,
-			},
-		},
+		Client:         &http.Client{},
 		config:         &config,
 		metricsTracker: metricsTracker,
 	}, nil
@@ -63,9 +43,6 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 
 	var lastErr error
 	originalCtx := req.Context()
-
-	reqID := uuid.New().String()
-	originalCtx = context.WithValue(originalCtx, "req-ID", reqID)
 
 	if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 		var modelsToTry []string
@@ -139,20 +116,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
 			timeout = t
 		}
-		// Retrieve the value from the context.
-		val := originalCtx.Value("req-ID")
-		if val == nil {
-			fmt.Println("No request ID found in context")
-		}
-		reqID, ok := val.(string)
-		if !ok {
-			fmt.Println("Request ID is not a string")
-		}
 
 		ctx, cancel := context.WithTimeout(originalCtx, time.Duration(timeout*float64(time.Second)))
 		defer cancel()
 
-		_err := c.metricsTracker.checkModelHealth(reqID, modelFull, "success", c.config)
+		_err := c.metricsTracker.checkModelHealth(modelFull, "success", c.config)
 		if _err != nil {
 			cancel()
 			lastErr = _err
@@ -183,7 +151,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			lastErr = err
 			errorLog("❌ Request failed ", lastErr)
 			// Record the latency in SQLite.
-			recErr := c.metricsTracker.recordLatency(reqID, modelFull, elapsed, "Request Failed")
+			recErr := c.metricsTracker.recordLatency(modelFull, elapsed, "failed")
 			if recErr != nil {
 				errorLog("Error recording latency:", recErr)
 			}
@@ -210,7 +178,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			lastStatusCode = resp.StatusCode
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				// Record the latency in SQLite.
-				recErr := c.metricsTracker.recordLatency(reqID, modelFull, elapsed, "request success")
+				recErr := c.metricsTracker.recordLatency(modelFull, elapsed, "success")
 				if recErr != nil {
 					errorLog("Error recording latency:", recErr)
 				}
@@ -243,12 +211,6 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					string(body))
 			}
 			errorLog("❌ Request failed ", lastErr)
-			// Record the latency in SQLite.
-			recErr := c.metricsTracker.recordLatency(reqID, modelFull, elapsed, "Request Failed From Host")
-			if recErr != nil {
-				errorLog("Error recording latency:", recErr)
-			}
-
 		}
 
 		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {

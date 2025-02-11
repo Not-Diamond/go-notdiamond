@@ -13,42 +13,42 @@ func almostEqual(a, b, tol float64) bool {
 }
 
 func TestNewStatistics(t *testing.T) {
-	stats := NewStatistics()
+	stats := newStatistics()
 	if stats == nil {
 		t.Fatal("NewStatistics returned nil")
 	}
-	if len(stats.Data) != 0 {
-		t.Fatalf("Expected new Statistics to have 0 data points, got %d", len(stats.Data))
+	if len(stats.data) != 0 {
+		t.Fatalf("Expected new Statistics to have 0 data points, got %d", len(stats.data))
 	}
 }
 
 func TestAddAndSum(t *testing.T) {
-	stats := NewStatistics()
-	stats.Add(time.Now(), 1.0)
-	stats.Add(time.Now(), 2.0)
-	stats.Add(time.Now(), 3.0)
+	stats := newStatistics()
+	stats.add(time.Now(), 1.0)
+	stats.add(time.Now(), 2.0)
+	stats.add(time.Now(), 3.0)
 
 	expectedSum := 6.0
-	sum := stats.Sum()
+	sum := stats.sum()
 	if !almostEqual(sum, expectedSum, 1e-9) {
 		t.Errorf("Expected sum %f, got %f", expectedSum, sum)
 	}
 }
 
 func TestAverageEmpty(t *testing.T) {
-	stats := NewStatistics()
-	_, err := stats.Average()
+	stats := newStatistics()
+	_, err := stats.average()
 	if err == nil {
 		t.Error("Expected error for Average on empty data, got nil")
 	}
 }
 
 func TestAverageNonEmpty(t *testing.T) {
-	stats := NewStatistics()
-	stats.Add(time.Now(), 1.0)
-	stats.Add(time.Now(), 2.0)
-	stats.Add(time.Now(), 3.0)
-	avg, err := stats.Average()
+	stats := newStatistics()
+	stats.add(time.Now(), 1.0)
+	stats.add(time.Now(), 2.0)
+	stats.add(time.Now(), 3.0)
+	avg, err := stats.average()
 	if err != nil {
 		t.Fatalf("Unexpected error computing Average: %v", err)
 	}
@@ -60,14 +60,14 @@ func TestAverageNonEmpty(t *testing.T) {
 
 func TestMovingAverage_WindowSizeOne(t *testing.T) {
 	// With window size 1, each moving average value should equal the original value.
-	stats := NewStatistics()
+	stats := newStatistics()
 	baseTime := time.Now()
 	values := []float64{1, 2, 3, 4, 5}
 	for i, v := range values {
-		stats.Add(baseTime.Add(time.Duration(i)*time.Second), v)
+		stats.add(baseTime.Add(time.Duration(i)*time.Second), v)
 	}
 
-	mavg, err := stats.MovingAverage(1)
+	mavg, err := stats.movingAverage(1)
 	if err != nil {
 		t.Fatalf("Unexpected error computing MovingAverage: %v", err)
 	}
@@ -88,14 +88,14 @@ func TestMovingAverage_WindowSizeThree(t *testing.T) {
 	// index 2: average(1,2,3) = 2.0
 	// index 3: average(2,3,4) = 3.0
 	// index 4: average(3,4,5) = 4.0
-	stats := NewStatistics()
+	stats := newStatistics()
 	baseTime := time.Now()
 	values := []float64{1, 2, 3, 4, 5}
 	for i, v := range values {
-		stats.Add(baseTime.Add(time.Duration(i)*time.Second), v)
+		stats.add(baseTime.Add(time.Duration(i)*time.Second), v)
 	}
 
-	mavg, err := stats.MovingAverage(3)
+	mavg, err := stats.movingAverage(3)
 	if err != nil {
 		t.Fatalf("Unexpected error computing MovingAverage: %v", err)
 	}
@@ -112,14 +112,14 @@ func TestMovingAverage_WindowSizeThree(t *testing.T) {
 
 func TestMovingAverage_WindowSizeLargerThanData(t *testing.T) {
 	// When window size exceeds the number of data points, the average is computed on the available points.
-	stats := NewStatistics()
+	stats := newStatistics()
 	baseTime := time.Now()
 	values := []float64{10, 20}
 	for i, v := range values {
-		stats.Add(baseTime.Add(time.Duration(i)*time.Second), v)
+		stats.add(baseTime.Add(time.Duration(i)*time.Second), v)
 	}
 
-	mavg, err := stats.MovingAverage(5)
+	mavg, err := stats.movingAverage(5)
 	if err != nil {
 		t.Fatalf("Unexpected error computing MovingAverage: %v", err)
 	}
@@ -131,31 +131,31 @@ func TestMovingAverage_WindowSizeLargerThanData(t *testing.T) {
 }
 
 func TestMovingAverage_InvalidWindow(t *testing.T) {
-	stats := NewStatistics()
-	stats.Add(time.Now(), 1.0)
-	_, err := stats.MovingAverage(0)
+	stats := newStatistics()
+	stats.add(time.Now(), 1.0)
+	_, err := stats.movingAverage(0)
 	if err == nil {
 		t.Error("Expected error for window size <= 0, got nil")
 	}
 }
 
 func TestMinAndMax(t *testing.T) {
-	stats := NewStatistics()
+	stats := newStatistics()
 	// Test on empty data: expect error.
-	if _, err := stats.Min(); err == nil {
+	if _, err := stats.min(); err == nil {
 		t.Error("Expected error for Min on empty data, got nil")
 	}
-	if _, err := stats.Max(); err == nil {
+	if _, err := stats.max(); err == nil {
 		t.Error("Expected error for Max on empty data, got nil")
 	}
 
 	// Add multiple data points.
-	stats.Add(time.Now(), 5.0)
-	stats.Add(time.Now(), 2.0)
-	stats.Add(time.Now(), 8.0)
-	stats.Add(time.Now(), 3.0)
+	stats.add(time.Now(), 5.0)
+	stats.add(time.Now(), 2.0)
+	stats.add(time.Now(), 8.0)
+	stats.add(time.Now(), 3.0)
 
-	min, err := stats.Min()
+	min, err := stats.min()
 	if err != nil {
 		t.Fatalf("Unexpected error computing Min: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestMinAndMax(t *testing.T) {
 		t.Errorf("Expected Min to be 2.0, got %f", min)
 	}
 
-	max, err := stats.Max()
+	max, err := stats.max()
 	if err != nil {
 		t.Fatalf("Unexpected error computing Max: %v", err)
 	}

@@ -22,7 +22,6 @@ func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 
 	// Create the table if it does not exist.
 	err = db.makeTables(true, "model_metrics", Message{
-		"reqID":   "TEXT",
 		"model":   "TEXT",
 		"latency": "REAL",
 		"status":  "TEXT",
@@ -35,9 +34,9 @@ func newMetricsTracker(dbPath string) (*metricsTracker, error) {
 }
 
 // recordLatency records a call's latency for a given model.
-func (mt *metricsTracker) recordLatency(reqID string, model string, latency float64, status string) error {
-	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, reqID, model, latency, status) VALUES(?, ?, ?, ?, ?)",
-		time.Now().UTC(), reqID, model, latency, status)
+func (mt *metricsTracker) recordLatency(model string, latency float64, status string) error {
+	err := mt.db.execQuery("INSERT INTO model_metrics(timestamp, model, latency, status) VALUES(?, ?, ?, ?)",
+		time.Now().UTC(), model, latency, status)
 	return err
 }
 
@@ -64,7 +63,7 @@ func (mt *metricsTracker) checkRecoveryTime(model string, config *Config) error 
 // checkModelHealth returns true if the model is healthy (i.e. its average latency over the last
 // noOfCalls does not exceed avgLatency threshold). If the model is unhealthy, it is considered “blacklisted”
 // until recoveryTime has elapsed since the last call that exceeded the threshold.
-func (mt *metricsTracker) checkModelHealth(reqID, model string, status string, config *Config) error {
+func (mt *metricsTracker) checkModelHealth(model string, status string, config *Config) error {
 	if config.ModelLatency[model].NoOfCalls > 10 {
 		config.ModelLatency[model].NoOfCalls = 10 // Enforce maximum
 	}
@@ -72,10 +71,6 @@ func (mt *metricsTracker) checkModelHealth(reqID, model string, status string, c
 		config.ModelLatency[model].RecoveryTime = time.Hour // Enforce maximum
 	}
 
-	//err := mt.checkRecoveryTime(model, config)
-	//if err != nil {
-	//	return err
-	//}
 	// executeQuery the most recent noOfCalls calls for the model.
 	raw_query := `
 	SELECT timestamp, latency FROM model_metrics
@@ -91,7 +86,7 @@ func (mt *metricsTracker) checkModelHealth(reqID, model string, status string, c
 	defer rows.Close()
 
 	// Create a new Statistics instance to accumulate data.
-	stats := NewStatistics()
+	stats := newStatistics()
 
 	for rows.Next() {
 		var ts string
@@ -108,42 +103,27 @@ func (mt *metricsTracker) checkModelHealth(reqID, model string, status string, c
 				return errors.Wrap(err, "CheckModelHealth parse time")
 			}
 		}
-		stats.Add(t, latency)
+		stats.add(t, latency)
 	}
 
 	if err := rows.Err(); err != nil {
 		return errors.Wrap(err, "getting rows error")
 	}
 
-	//average, err := stats.MovingAverage(config.ModelLatency[model].NoOfCalls)
-	//if err != nil {
-	//	return errors.Wrap(err, "CheckModelHealth moving average")
-	//}
-	//if average > config.ModelLatency[model].AvgLatencyThreshold {
-	//	err = mt.recordRecoveryTime(model)
-	//	if err == nil {
-	//		logger.Infof("Recovery time for model: %s started", model)
-	//	}
-	//	return errors.Errorf("Average latency for model %s is below threshold: %f. Resetting time for recovery", model, average)
-	//}
-	//
-	//if err := rows.Err(); err != nil {
-	//	return err
-	//}
-	//return nil
 	// If there are not enough data points, assume model is healthy.
-	if len(stats.Data) < config.ModelLatency[model].NoOfCalls {
+	if len(stats.data) < config.ModelLatency[model].NoOfCalls {
+		infoLog(fmt.Sprintf("Not enough data points for model %s, skipping health check", model))
 		return nil
 	}
 
 	// Our query returned data in descending order (most recent first).
 	// Reverse the slice so that data is in ascending order (oldest first)
-	for i, j := 0, len(stats.Data)-1; i < j; i, j = i+1, j-1 {
-		stats.Data[i], stats.Data[j] = stats.Data[j], stats.Data[i]
+	for i, j := 0, len(stats.data)-1; i < j; i, j = i+1, j-1 {
+		stats.data[i], stats.data[j] = stats.data[j], stats.data[i]
 	}
 
 	// Compute the moving average with a window equal to config.NoOfCalls.
-	movingAverages, err := stats.MovingAverage(config.ModelLatency[model].NoOfCalls)
+	movingAverages, err := stats.movingAverage(config.ModelLatency[model].NoOfCalls)
 	if err != nil {
 		return err
 	}
@@ -153,13 +133,16 @@ func (mt *metricsTracker) checkModelHealth(reqID, model string, status string, c
 	// If the latest moving average exceeds the threshold, check the recovery time.
 	if latestMovingAvg > config.ModelLatency[model].AvgLatencyThreshold {
 		// Use the timestamp of the most recent record (now at the end after reversal)
-		latestTimestamp := stats.Data[len(stats.Data)-1].Timestamp
+		latestTimestamp := stats.data[len(stats.data)-1].timestamp
 		if time.Since(latestTimestamp) < config.ModelLatency[model].RecoveryTime {
 			// High moving average and recent data: model is unhealthy.
 			return errors.Errorf("High moving average and recent data: model is unhealthy.")
+		} else {
+			infoLog(fmt.Sprintf("Model %s has recovered, but moving average: %.2f is above threshold: %.2f", model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold))
 		}
 	}
 	// Otherwise, the model is healthy.
+	infoLog(fmt.Sprintf("Model %s is healthy, moving average: %.2f is below threshold: %.2f", model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold))
 	return nil
 }
 
