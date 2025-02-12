@@ -130,7 +130,7 @@ func TestTryWithRetries(t *testing.T) {
 				"openai/gpt-4": 3,
 			},
 			timeout: map[string]float64{
-				"openai/gpt-4": 10.0,
+				"openai/gpt-4": 0.1,
 			},
 			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
@@ -138,8 +138,8 @@ func TestTryWithRetries(t *testing.T) {
 			modelLatency: model.ModelLatency{
 				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
-					NoOfCalls:           5,               // Max 10
-					RecoveryTime:        5 * time.Minute, // Max 1h
+					NoOfCalls:           5,
+					RecoveryTime:        100 * time.Millisecond,
 				},
 			},
 			setupTransport: func() *mockTransport {
@@ -162,10 +162,10 @@ func TestTryWithRetries(t *testing.T) {
 				"openai/gpt-4": 3,
 			},
 			timeout: map[string]float64{
-				"openai/gpt-4": 10.0,
+				"openai/gpt-4": 0.1,
 			},
 			backoff: map[string]float64{
-				"openai/gpt-4": 0.1,
+				"openai/gpt-4": 0.01,
 			},
 			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
@@ -173,8 +173,8 @@ func TestTryWithRetries(t *testing.T) {
 			modelLatency: model.ModelLatency{
 				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
-					NoOfCalls:           5,               // Max 10
-					RecoveryTime:        5 * time.Minute, // Max 1h
+					NoOfCalls:           5,
+					RecoveryTime:        100 * time.Millisecond,
 				},
 			},
 			setupTransport: func() *mockTransport {
@@ -203,10 +203,10 @@ func TestTryWithRetries(t *testing.T) {
 				"openai/gpt-4": 2,
 			},
 			timeout: map[string]float64{
-				"openai/gpt-4": 10.0,
+				"openai/gpt-4": 0.1,
 			},
 			backoff: map[string]float64{
-				"openai/gpt-4": 0.1,
+				"openai/gpt-4": 0.01,
 			},
 			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
@@ -214,8 +214,8 @@ func TestTryWithRetries(t *testing.T) {
 			modelLatency: model.ModelLatency{
 				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
-					NoOfCalls:           5,               // Max 10
-					RecoveryTime:        5 * time.Minute, // Max 1h
+					NoOfCalls:           5,
+					RecoveryTime:        100 * time.Millisecond,
 				},
 			},
 			setupTransport: func() *mockTransport {
@@ -237,7 +237,7 @@ func TestTryWithRetries(t *testing.T) {
 				"openai/gpt-4": 1,
 			},
 			timeout: map[string]float64{
-				"openai/gpt-4": 10.0,
+				"openai/gpt-4": 0.1,
 			},
 			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
@@ -245,8 +245,8 @@ func TestTryWithRetries(t *testing.T) {
 			modelLatency: model.ModelLatency{
 				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
-					NoOfCalls:           5,               // Max 10
-					RecoveryTime:        5 * time.Minute, // Max 1h
+					NoOfCalls:           5,
+					RecoveryTime:        100 * time.Millisecond,
 				},
 			},
 			setupTransport: func() *mockTransport {
@@ -973,7 +973,7 @@ func TestDoWithLatencies(t *testing.T) {
 		{
 			name: "successful first attempt with ordered models",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
-				// In this scenario, the transport delay is 5 seconds.
+				// In this scenario, the transport delay is 0.5 seconds.
 				// Since the number of calls required is 5 (window size),
 				// and only one record is recorded (insufficient to compute moving average),
 				// the model is assumed healthy.
@@ -984,8 +984,8 @@ func TestDoWithLatencies(t *testing.T) {
 							Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
 						},
 					},
-					// 5-second delay (recorded latency ~5 seconds)
-					delay: 5 * time.Second,
+					// 0.5-second delay (recorded latency ~0.5 seconds)
+					delay: 500 * time.Millisecond,
 				}
 				metrics, err := metric.NewTracker(":memory:" + "successful_first_attempt")
 				if err != nil {
@@ -998,13 +998,13 @@ func TestDoWithLatencies(t *testing.T) {
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,               // window size
-								RecoveryTime:        5 * time.Minute, // recovery period
+								NoOfCalls:           5,                      // window size
+								RecoveryTime:        100 * time.Millisecond, // recovery period
 							},
 							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,               // window size
-								RecoveryTime:        5 * time.Minute, // recovery period
+								NoOfCalls:           5,                      // window size
+								RecoveryTime:        100 * time.Millisecond, // recovery period
 							},
 						},
 					},
@@ -1018,14 +1018,14 @@ func TestDoWithLatencies(t *testing.T) {
 		{
 			name: "latency delay without recovery (model unhealthy)",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
-				// In this case, we set the window size to 1 so that the single measured latency (~6 seconds)
-				// immediately becomes the moving average. Because 6 > threshold (3.5)
+				// In this case, we set the window size to 1 so that the single measured latency (~0.6 seconds)
+				// immediately becomes the moving average. Because 0.6 > threshold (0.35)
 				// and the record's timestamp is current (i.e. within the RecoveryTime),
 				// the model should be considered unhealthy and tryWithRetries will return an error
 				// without making an HTTP call.
 				transport := &mockTransport{
 					// No response will be used because the unhealthy check fails before sending.
-					delay: 6 * time.Second,
+					delay: 600 * time.Millisecond,
 				}
 				metrics, err := metric.NewTracker(":memory:" + "latency_delay_without_recovery")
 				if err != nil {
@@ -1037,34 +1037,28 @@ func TestDoWithLatencies(t *testing.T) {
 						// Set window size to 1 so that the measured latency is used immediately.
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
-								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           1,               // immediate decision
-								RecoveryTime:        1 * time.Minute, // recovery period
+								AvgLatencyThreshold: 0.35,
+								NoOfCalls:           1,                      // immediate decision
+								RecoveryTime:        100 * time.Millisecond, // recovery period
 							},
 							"azure/gpt-4": &model.RollingAverageLatency{
-								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           1,               // immediate decision
-								RecoveryTime:        1 * time.Minute, // recovery period
+								AvgLatencyThreshold: 0.35,
+								NoOfCalls:           1,                      // immediate decision
+								RecoveryTime:        100 * time.Millisecond, // recovery period
 							},
 						},
 					},
 					metricsTracker: metrics,
 				}
-				// Do not pre-populate the DB, so the only latency record will be the new one (current timestamp).
-				// This should result in an unhealthy check.
 				return client, transport
 			},
-			expectedCalls: 0, // Expect that tryWithRetries returns before making an HTTP call
+			expectedCalls: 0,
 			expectError:   true,
-			errorContains: "azure", // expecting error message indicating unhealthy model
+			errorContains: "azure",
 		},
 		{
 			name: "latency delay with recovery (model healthy)",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
-				// In this scenario, we set a delay that causes high latency,
-				// but we pre-populate the metrics DB with an old record so that
-				// when CheckModelHealth queries the DB, the latest record is old enough (beyond RecoveryTime)
-				// and the model is considered healthy.
 				transport := &mockTransport{
 					responses: []*http.Response{
 						{
@@ -1072,7 +1066,7 @@ func TestDoWithLatencies(t *testing.T) {
 							Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
 						},
 					},
-					delay: 6 * time.Second,
+					delay: 500 * time.Millisecond,
 				}
 				metrics, err := metric.NewTracker(":memory:" + "latency_delay_with_recovery")
 				if err != nil {
@@ -1081,27 +1075,20 @@ func TestDoWithLatencies(t *testing.T) {
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
 					config: model.Config{
-						// Set window size to 1 so that the latency measurement is used directly.
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           1,               // immediate decision
-								RecoveryTime:        1 * time.Minute, // recovery period
+								NoOfCalls:           5,                      // window size
+								RecoveryTime:        100 * time.Millisecond, // recovery period
 							},
 							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           1,               // immediate decision
-								RecoveryTime:        1 * time.Minute, // recovery period
+								NoOfCalls:           5,                      // window size
+								RecoveryTime:        100 * time.Millisecond, // recovery period
 							},
 						},
 					},
 					metricsTracker: metrics,
-				}
-
-				// TODO
-				err = metrics.RecordLatency("openai/gpt-4o-mini", 100.0, "success")
-				if err != nil {
-					log.Fatalf("Failed to insert old latency record: %v", err)
 				}
 				return client, transport
 			},

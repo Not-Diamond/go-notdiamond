@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -566,5 +567,214 @@ func TestDropMetricsTracker(t *testing.T) {
 	// Verify that the database file no longer exists.
 	if _, err := os.Stat(dbFile); !os.IsNotExist(err) {
 		t.Errorf("Expected database file %q to be removed after dropDB(), but it exists", dbFile)
+	}
+}
+
+// TestCheckModelHealth_LatencyFallback verifies that a model is marked unhealthy
+// when its average latency exceeds the threshold and remains in recovery for the specified duration.
+func TestCheckModelHealth_LatencyFallback(t *testing.T) {
+	setupTempDB(t)
+
+	mt, err := NewTracker("test_metrics_latency_fallback")
+	if err != nil {
+		t.Fatalf("NewMetricsTracker failed: %v", err)
+	}
+	defer mt.Close()
+
+	currentModel := "test/model"
+	var config model.Config
+	config.ModelLatency = make(model.ModelLatency)
+	config.ModelLatency[currentModel] = &model.RollingAverageLatency{
+		AvgLatencyThreshold: 0.5,             // 500ms threshold
+		NoOfCalls:           5,               // Need 5 calls to calculate average
+		RecoveryTime:        1 * time.Second, // Short recovery for testing
+	}
+
+	// Record 5 high-latency calls
+	for i := 0; i < 5; i++ {
+		err := mt.RecordLatency(currentModel, 1.0, "success") // 1 second latency
+		if err != nil {
+			t.Fatalf("RecordLatency failed: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond) // Ensure distinct timestamps
+	}
+
+	// First check should mark the model as unhealthy
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil {
+		t.Error("Expected model to be marked as unhealthy")
+	} else if !strings.Contains(err.Error(), "is unhealthy") {
+		t.Errorf("Expected unhealthy error message, got: %v", err)
+	}
+
+	// Immediate recheck should show model in recovery period
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil {
+		t.Error("Expected model to be in recovery period")
+	} else if !strings.Contains(err.Error(), "recovery period") {
+		t.Errorf("Expected recovery period error message, got: %v", err)
+	}
+
+	// Wait for recovery time to pass
+	time.Sleep(2 * time.Second)
+
+	// Model should now be allowed to try again
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err != nil {
+		t.Errorf("Expected model to be recovered, got error: %v", err)
+	}
+}
+
+// TestCheckModelHealth_RecoveryAndReset tests that:
+// 1. Model becomes unhealthy after high latencies
+// 2. Model stays in recovery for the specified duration
+// 3. After recovery, old latency data is cleared
+// 4. Model becomes healthy and can become unhealthy again with new high latencies
+func TestCheckModelHealth_RecoveryAndReset(t *testing.T) {
+	setupTempDB(t)
+
+	mt, err := NewTracker("test_metrics_recovery_reset")
+	if err != nil {
+		t.Fatalf("NewMetricsTracker failed: %v", err)
+	}
+	defer mt.Close()
+
+	currentModel := "test/model"
+	var config model.Config
+	config.ModelLatency = make(model.ModelLatency)
+	config.ModelLatency[currentModel] = &model.RollingAverageLatency{
+		AvgLatencyThreshold: 0.5,                    // 500ms threshold
+		NoOfCalls:           5,                      // Need 5 calls to calculate average
+		RecoveryTime:        100 * time.Millisecond, // Shorter recovery time for testing
+	}
+
+	// Step 1: Record 5 high-latency calls to make model unhealthy
+	for i := 0; i < 5; i++ {
+		err := mt.RecordLatency(currentModel, 1.0, "success") // 1 second latency
+		if err != nil {
+			t.Fatalf("RecordLatency failed: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond) // Shorter delay between records
+	}
+
+	// Check that model is marked unhealthy
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil || !strings.Contains(err.Error(), "is unhealthy") {
+		t.Fatalf("Expected model to be marked as unhealthy, got error: %v", err)
+	}
+
+	// Step 2: Verify model stays in recovery
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil || !strings.Contains(err.Error(), "recovery period") {
+		t.Fatalf("Expected model to be in recovery period, got error: %v", err)
+	}
+
+	// Step 3: Wait for recovery time to pass
+	time.Sleep(150 * time.Millisecond) // Wait slightly longer than recovery time
+
+	// Step 4: Verify model is healthy and latency data was cleared
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err != nil {
+		t.Errorf("Expected model to be healthy after recovery, got error: %v", err)
+	}
+
+	// Verify latency data was cleared by checking the count
+	rows, err := mt.db.Query("SELECT COUNT(*) FROM model_metrics WHERE model = ?", currentModel)
+	if err != nil {
+		t.Fatalf("Failed to query metrics count: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	if rows.Next() {
+		err = rows.Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to scan count: %v", err)
+		}
+	}
+	if count != 0 {
+		t.Errorf("Expected latency data to be cleared (count = 0), got count = %d", count)
+	}
+
+	// Step 5: Record new high latencies and verify model can become unhealthy again
+	for i := 0; i < 5; i++ {
+		err := mt.RecordLatency(currentModel, 1.0, "success")
+		if err != nil {
+			t.Fatalf("RecordLatency failed: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond) // Shorter delay between records
+	}
+
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil || !strings.Contains(err.Error(), "is unhealthy") {
+		t.Fatalf("Expected model to become unhealthy again with new high latencies, got error: %v", err)
+	}
+}
+
+// TestCheckModelHealth_RecoveryTimeClearing tests that:
+// 1. Recovery time is properly recorded when model becomes unhealthy
+// 2. Recovery time is cleared after recovery period
+func TestCheckModelHealth_RecoveryTimeClearing(t *testing.T) {
+	setupTempDB(t)
+
+	mt, err := NewTracker("test_metrics_recovery_clearing")
+	if err != nil {
+		t.Fatalf("NewMetricsTracker failed: %v", err)
+	}
+	defer mt.Close()
+
+	currentModel := "test/model"
+	var config model.Config
+	config.ModelLatency = make(model.ModelLatency)
+	config.ModelLatency[currentModel] = &model.RollingAverageLatency{
+		AvgLatencyThreshold: 0.5,
+		NoOfCalls:           5,
+		RecoveryTime:        100 * time.Millisecond,
+	}
+
+	// Make model unhealthy to record recovery time
+	for i := 0; i < 5; i++ {
+		err := mt.RecordLatency(currentModel, 1.0, "success")
+		if err != nil {
+			t.Fatalf("RecordLatency failed: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// First check should mark the model as unhealthy and record recovery time
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil || !strings.Contains(err.Error(), "is unhealthy") {
+		t.Fatalf("Expected model to be marked as unhealthy, got error: %v", err)
+	}
+
+	// Verify we're in recovery period
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err == nil || !strings.Contains(err.Error(), "recovery period") {
+		t.Fatalf("Expected model to be in recovery period, got error: %v", err)
+	}
+
+	// Now verify recovery time is recorded
+	var recoveryTime time.Time
+	err = mt.db.GetJSON("keystore", currentModel, &recoveryTime)
+	if err != nil {
+		t.Errorf("Expected recovery time to be recorded, got error: %v", err)
+	}
+
+	// Wait for recovery period
+	time.Sleep(150 * time.Millisecond)
+
+	// Check model health to trigger recovery time clearing
+	err = mt.CheckModelHealth(currentModel, "success", config)
+	if err != nil {
+		t.Errorf("Expected model to be healthy after recovery, got error: %v", err)
+	}
+
+	// Add a small delay to ensure database operations complete
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify recovery time was cleared
+	err = mt.db.GetJSON("keystore", currentModel, &recoveryTime)
+	if err == nil {
+		t.Error("Expected recovery time to be cleared, but it still exists")
 	}
 }
