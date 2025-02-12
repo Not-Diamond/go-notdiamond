@@ -39,53 +39,6 @@ func main() {
 		*azureRequest,
 	}
 
-	// config.ModelLatency = model.ModelLatency{
-	// 	"openai/gpt-4o-mini": &model.RollingAverageLatency{
-	// 		AvgLatencyThreshold: 0.5,
-	// 		NoOfCalls:           5,
-	// 		RecoveryTime:        1 * time.Minute,
-	// 	},
-	// 	"azure/gpt-4o-mini": &model.RollingAverageLatency{
-	// 		AvgLatencyThreshold: 6,
-	// 		NoOfCalls:           10,
-	// 		RecoveryTime:        1 * time.Minute,
-	// 	},
-	// 	"azure/gpt-4o": &model.RollingAverageLatency{
-	// 		AvgLatencyThreshold: 3.2,
-	// 		NoOfCalls:           10,
-	// 		RecoveryTime:        3 * time.Second,
-	// 	},
-	// }
-
-	// config := model.Config{
-	// 	Clients: []http.Request{
-	// 		*openaiRequest,
-	// 		*azureRequest,
-	// 	},
-	// 	Models: model.WeightedModels{
-	// 		"openai/gpt-4o-mini": 0.4,
-	// 		"azure/gpt-4o-mini":  0.4,
-	// 		"azure/gpt-4o":       0.2,
-	// 	},
-	// 	ModelLatency: model.ModelLatency{
-	// 		"openai/gpt-4o-mini": &model.RollingAverageLatency{
-	// 			AvgLatencyThreshold: 0.5,
-	// 			NoOfCalls:           5,
-	// 			RecoveryTime:        1 * time.Minute,
-	// 		},
-	// 		"azure/gpt-4o": &model.RollingAverageLatency{
-	// 			AvgLatencyThreshold: 3.2,
-	// 			NoOfCalls:           10,
-	// 			RecoveryTime:        3 * time.Second,
-	// 		},
-	// 		"azure/gpt-4o-mini": &model.RollingAverageLatency{
-	// 			AvgLatencyThreshold: 6,
-	// 			NoOfCalls:           10,
-	// 			RecoveryTime:        1 * time.Minute,
-	// 		},
-	// 	},
-	// }
-
 	transport, err := notdiamond.NewTransport(config)
 	if err != nil {
 		log.Fatalf("Failed to create transport: %v", err)
