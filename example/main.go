@@ -12,6 +12,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 
+	test_weighted "example/manual-test-cases/weighted_models"
 	"example/openai"
 )
 
@@ -31,33 +32,11 @@ func main() {
 		log.Fatalf("Failed to create azure request: %v", err)
 	}
 
-	config := model.Config{
-		Clients: []http.Request{
-			*openaiRequest,
-			*azureRequest,
-		},
-		Models: model.WeightedModels{
-			"openai/gpt-4o-mini": 0.4,
-			"azure/gpt-4o-mini":  0.4,
-			"azure/gpt-4o":       0.2,
-		},
-		ModelLatency: model.ModelLatency{
-			"openai/gpt-4o-mini": &model.RollingAverageLatency{
-				AvgLatencyThreshold: 0.5,
-				NoOfCalls:           5,
-				RecoveryTime:        1 * time.Minute,
-			},
-			"azure/gpt-4o": &model.RollingAverageLatency{
-				AvgLatencyThreshold: 3.2,
-				NoOfCalls:           10,
-				RecoveryTime:        3 * time.Second,
-			},
-			"azure/gpt-4o-mini": &model.RollingAverageLatency{
-				AvgLatencyThreshold: 6,
-				NoOfCalls:           10,
-				RecoveryTime:        1 * time.Minute,
-			},
-		},
+	config := test_weighted.WeightedModels
+
+	config.Clients = []http.Request{
+		*openaiRequest,
+		*azureRequest,
 	}
 
 	transport, err := notdiamond.NewTransport(config)
@@ -69,7 +48,7 @@ func main() {
 		Transport: transport,
 	}
 
-	messages := []map[string]string{
+	messages := []model.Message{
 		{"role": "user", "content": "Hello, how are you?"},
 	}
 
@@ -83,7 +62,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionss", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
@@ -98,9 +77,8 @@ func main() {
 		log.Fatalf("Failed to do request: %v", err)
 	}
 	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-
+		if err := Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
 		}
 	}(resp.Body)
 

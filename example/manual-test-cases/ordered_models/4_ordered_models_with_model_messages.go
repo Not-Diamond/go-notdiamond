@@ -12,13 +12,13 @@ var OrderedModelsWithModelMessages = model.Config{
 	},
 	ModelMessages: map[string][]model.Message{
 		"openai/gpt-4o-mini": {
-			{"role": "user", "content": "Please respond only with answer in romanian."},
+			{"role": "system", "content": "Please respond only with answer in romanian."},
 		},
 		"azure/gpt-4o-mini": {
-			{"role": "user", "content": "Please respond only with answer in spanish."},
+			{"role": "system", "content": "Please respond only with answer in spanish."},
 		},
 		"azure/gpt-4o": {
-			{"role": "user", "content": "Please respond only with answer in french."},
+			{"role": "system", "content": "Please respond only with answer in french."},
 		},
 	},
 }

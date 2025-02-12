@@ -13,16 +13,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
+	"github.com/Not-Diamond/go-notdiamond/pkg/validation"
 )
 
+// NotDiamondHttpClient is a type that can be used to represent a NotDiamond HTTP client.
 type NotDiamondHttpClient struct {
 	*http.Client
 	config         model.Config
 	metricsTracker *metric.Tracker
 }
 
+// NewNotDiamondHttpClient creates a new NotDiamond HTTP client.
 func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error) {
 	metricsTracker, err := metric.NewTracker("metrics")
 	if err != nil {
@@ -37,12 +41,13 @@ func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error)
 	}, nil
 }
 
+// Do executes a request.
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	slog.Info("→ Executing request", "url", req.URL.String())
 
-	messages := extractMessagesFromRequest(req)
-	extractedModel := extractModelFromRequest(req)
-	extractedProvider := extractProviderFromRequest(req)
+	messages := request.ExtractMessagesFromRequest(req)
+	extractedModel := request.ExtractModelFromRequest(req)
+	extractedProvider := request.ExtractProviderFromRequest(req)
 	currentModel := extractedProvider + "/" + extractedModel
 
 	var lastErr error
@@ -80,6 +85,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("all requests failed: %v", lastErr)
 }
 
+// getMaxRetriesForStatus gets the maximum retries for a status code.
 func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCode int) int {
 	// Check model-specific status code retries first
 	if modelRetries, ok := c.config.StatusCodeRetry.(map[string]map[string]int); ok {
@@ -104,6 +110,7 @@ func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCo
 	return 1
 }
 
+// tryWithRetries tries a request with retries.
 func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Request, messages []model.Message, originalCtx context.Context) (*http.Response, error) {
 	var lastErr error
 	var lastStatusCode int
@@ -139,7 +146,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		var resp *http.Response
 		var err error
 
-		if attempt == 0 && modelFull == extractProviderFromRequest(req)+"/"+extractModelFromRequest(req) {
+		if attempt == 0 && modelFull == request.ExtractProviderFromRequest(req)+"/"+request.ExtractModelFromRequest(req) {
 			currentReq := req.Clone(ctx)
 			resp, err = c.Client.Do(currentReq)
 		} else {
@@ -224,6 +231,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 	return nil, lastErr
 }
 
+// getWeightedModelsList gets a list of models with their cumulative weights.
 func getWeightedModelsList(weights model.WeightedModels) []string {
 	// Create a slice to store models with their cumulative weights
 	type weightedModel struct {
@@ -280,15 +288,47 @@ func getWeightedModelsList(weights model.WeightedModels) []string {
 	return result
 }
 
-func combineMessages(modelMessages []model.Message, userMessages []model.Message) []model.Message {
+// combineMessages combines model messages and user messages.
+func combineMessages(modelMessages []model.Message, userMessages []model.Message) ([]model.Message, error) {
 	combinedMessages := make([]model.Message, 0)
-	if len(modelMessages) > 0 {
-		combinedMessages = append(combinedMessages, modelMessages...)
+
+	// Find system message from modelMessages if any exists
+	var systemMessage model.Message
+	for _, msg := range modelMessages {
+		if msg["role"] == "system" {
+			systemMessage = msg
+			break
+		}
 	}
-	combinedMessages = append(combinedMessages, userMessages...)
-	return combinedMessages
+
+	// Add the system message if found
+	if systemMessage != nil {
+		combinedMessages = append(combinedMessages, systemMessage)
+	}
+
+	// Add non-system messages from modelMessages
+	for _, msg := range modelMessages {
+		if msg["role"] != "system" {
+			combinedMessages = append(combinedMessages, msg)
+		}
+	}
+
+	// Add all non-system messages from userMessages
+	for _, msg := range userMessages {
+		if msg["role"] != "system" {
+			combinedMessages = append(combinedMessages, msg)
+		}
+	}
+
+	if err := validation.ValidateMessageSequence(combinedMessages); err != nil {
+		slog.Error("invalid message sequence", "error", err)
+		return nil, err
+	}
+
+	return combinedMessages, nil
 }
 
+// tryNextModel tries the next model.
 func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
 	nextProvider, nextModel := parts[0], parts[1]
@@ -314,7 +354,10 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	}
 
 	modelMessages := client.HttpClient.config.ModelMessages[modelFull]
-	combinedMessages := combineMessages(modelMessages, messages)
+	combinedMessages, err := combineMessages(modelMessages, messages)
+	if err != nil {
+		return nil, err
+	}
 
 	payload := map[string]interface{}{
 		"model":    nextModel,
@@ -339,52 +382,4 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	}
 
 	return client.HttpClient.Client.Do(nextReq)
-}
-
-func extractModelFromRequest(req *http.Request) string {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return ""
-	}
-
-	req.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	var payload map[string]interface{}
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
-		return ""
-	}
-
-	if model, ok := payload["model"].(string); ok {
-		return model
-	}
-	return ""
-}
-
-func extractProviderFromRequest(req *http.Request) string {
-	url := req.URL.String()
-	if strings.Contains(url, "azure") {
-		return "azure"
-	} else if strings.Contains(url, "openai.com") {
-		return "openai"
-	}
-	return ""
-}
-
-func extractMessagesFromRequest(req *http.Request) []model.Message {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil
-	}
-
-	req.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	var payload struct {
-		Messages []model.Message `json:"messages"`
-	}
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
-		return nil
-	}
-	return payload.Messages
 }

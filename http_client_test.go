@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
@@ -69,14 +70,26 @@ func TestCombineMessages(t *testing.T) {
 			name: "multiple model messages",
 			modelMessages: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
-				{"role": "system", "content": "Respond in English"},
 			},
 			userMessages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			expected: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
-				{"role": "system", "content": "Respond in English"},
+				{"role": "user", "content": "Hello"},
+			},
+		},
+		{
+			name: "user message system ignored if model message system exists",
+			modelMessages: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant initial"},
+			},
+			userMessages: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant ignored"},
+				{"role": "user", "content": "Hello"},
+			},
+			expected: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant initial"},
 				{"role": "user", "content": "Hello"},
 			},
 		},
@@ -84,7 +97,10 @@ func TestCombineMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := combineMessages(tt.modelMessages, tt.userMessages)
+			got, err := combineMessages(tt.modelMessages, tt.userMessages)
+			if err != nil {
+				t.Errorf("combineMessages() = %v, want %v", err, nil)
+			}
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("combineMessages() = %v, want %v", got, tt.expected)
 			}
@@ -393,7 +409,7 @@ func TestTryNextModel(t *testing.T) {
 						config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"azure/gpt-4": {
-									{"role": "user", "content": "Hello"},
+									{"role": "system", "content": "Hello"},
 								},
 							},
 						},
@@ -444,7 +460,7 @@ func TestTryNextModel(t *testing.T) {
 						config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"openai/gpt-4": {
-									{"role": "user", "content": "Hello"},
+									{"role": "system", "content": "Hello"},
 								},
 							},
 						},
@@ -522,7 +538,7 @@ func TestTryNextModel(t *testing.T) {
 						config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"openai/gpt-4": {
-									{"role": "user", "content": "Hello"},
+									{"role": "system", "content": "Hello"},
 								},
 							},
 						},
@@ -608,7 +624,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
-			got := extractMessagesFromRequest(req)
+			got := request.ExtractMessagesFromRequest(req)
 
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("extractMessagesFromRequest() = %v, want %v", got, tt.expected)
@@ -661,7 +677,7 @@ func TestExtractProviderFromRequest(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
-			got := extractProviderFromRequest(req)
+			got := request.ExtractProviderFromRequest(req)
 			if got != tt.expected {
 				t.Errorf("extractProviderFromRequest() = %v, want %v", got, tt.expected)
 			}
@@ -717,7 +733,7 @@ func TestExtractModelFromRequest(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
-			got := extractModelFromRequest(req)
+			got := request.ExtractModelFromRequest(req)
 			if got != tt.expected {
 				t.Errorf("extractModelFromRequest() = %v, want %v", got, tt.expected)
 			}

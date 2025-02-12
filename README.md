@@ -35,9 +35,9 @@ openaiRequest := NewRequest("https://api.openai.com/v1/chat/completions", openai
 azureRequest := NewRequest(azureEndpoint, azureApiKey)
 
 // Create config
-config := notdiamond.Config{
+config := model.Config{
 	Clients: []http.Request{ openaiRequest, azureRequest },
-	Models: notdiamond.OrderedModels{ "azure/gpt-4o-mini", "openai/gpt-4o-mini" },
+	Models: model.OrderedModels{ "azure/gpt-4o-mini", "openai/gpt-4o-mini" },
 	MaxRetries: map[string]int{
 		"azure/gpt-4o-mini": 2,
 		"openai/gpt-4o-mini": 2,

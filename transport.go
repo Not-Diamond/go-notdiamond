@@ -2,11 +2,18 @@ package notdiamond
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
+	"bytes"
+
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
+	"github.com/Not-Diamond/go-notdiamond/pkg/validation"
 )
 
 type Transport struct {
@@ -16,7 +23,12 @@ type Transport struct {
 	config         model.Config
 }
 
+// NewTransport creates a new Transport.
 func NewTransport(config model.Config) (*Transport, error) {
+	if err := validation.ValidateConfig(config); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	metricsTracker, err := metric.NewTracker("metrics")
 	if err != nil {
 		return nil, err
@@ -47,6 +59,35 @@ func NewTransport(config model.Config) (*Transport, error) {
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Extract the original messages and model
+	messages := request.ExtractMessagesFromRequest(req)
+	extractedModel := request.ExtractModelFromRequest(req)
+	extractedProvider := request.ExtractProviderFromRequest(req)
+	currentModel := extractedProvider + "/" + extractedModel
+
+	// Combine with model messages if they exist
+	if modelMessages, exists := t.config.ModelMessages[currentModel]; exists {
+		combinedMessages, err := combineMessages(modelMessages, messages)
+		if err != nil {
+			return nil, err
+		}
+
+		// Update request body with combined messages
+		payload := map[string]interface{}{
+			"model":    extractedModel,
+			"messages": combinedMessages,
+		}
+
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+		req.ContentLength = int64(len(jsonData))
+	}
+
+	// Add client to context and proceed with request
 	ctx := context.WithValue(req.Context(), clientKey, t.client)
 	req = req.WithContext(ctx)
 
