@@ -212,7 +212,7 @@ func (d *Instance) Drop() error {
 	if err := d.CloseConnection(); err != nil {
 		return errors.Wrap(err, "Drop CloseConnection")
 	}
-	slog.Info("Deleting Instance file: %s", d.Schema)
+	slog.Info("Deleting Instance file", "path", d.Schema)
 	if err := os.Remove(d.Schema); err != nil {
 		return errors.Wrap(err, "Drop Remove")
 	}

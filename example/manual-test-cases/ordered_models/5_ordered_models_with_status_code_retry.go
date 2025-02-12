@@ -1,11 +1,11 @@
 package test_ordered
 
 import (
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
-var OrderedModelsWithStatusCodeRetry = types.Config{
-	Models: types.OrderedModels{
+var OrderedModelsWithStatusCodeRetry = model.Config{
+	Models: model.OrderedModels{
 		"openai/gpt-4o-mini",
 		"azure/gpt-4o-mini",
 		"azure/gpt-4o",

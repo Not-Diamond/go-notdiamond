@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
-func ValidateConfig(config types.Config) error {
+func ValidateConfig(config model.Config) error {
 	if err := validateClients(config.Clients); err != nil {
 		return err
 	}
@@ -31,9 +31,9 @@ func validateClients(clients []http.Request) error {
 
 func validateModels(models interface{}) error {
 	switch m := models.(type) {
-	case types.OrderedModels:
+	case model.OrderedModels:
 		return validateOrderedModels(m)
-	case types.WeightedModels:
+	case model.WeightedModels:
 		return validateWeightedModels(m)
 	default:
 		return fmt.Errorf("models must be either notdiamond.OrderedModels or map[string]float64, got %T", models)
@@ -105,7 +105,7 @@ func validateModelName(model string) error {
 
 func validateProvider(provider string) error {
 	switch provider {
-	case string(types.ClientTypeAzure), string(types.ClientTypeOpenai):
+	case string(model.ClientTypeAzure), string(model.ClientTypeOpenai):
 		return nil
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)

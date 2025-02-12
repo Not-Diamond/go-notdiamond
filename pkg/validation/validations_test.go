@@ -7,20 +7,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  types.Config
+		config  model.Config
 		wantErr bool
 	}{
 		{
 			name: "valid config with ordered models",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{*&http.Request{}},
-				Models: types.OrderedModels{
+				Models: model.OrderedModels{
 					"openai/gpt-4",
 					"azure/gpt-4",
 				},
@@ -29,9 +29,9 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with weighted models",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{*&http.Request{}},
-				Models: types.WeightedModels{
+				Models: model.WeightedModels{
 					"openai/gpt-4": 0.6,
 					"azure/gpt-4":  0.4,
 				},
@@ -40,23 +40,23 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "invalid - no clients",
-			config: types.Config{
-				Models: types.OrderedModels{"openai/gpt-4"},
+			config: model.Config{
+				Models: model.OrderedModels{"openai/gpt-4"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid - no models",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{*&http.Request{}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid - wrong model type",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{*&http.Request{}},
-				Models:  types.CustomInvalidType{},
+				Models:  model.CustomInvalidType{},
 			},
 			wantErr: true,
 		},
@@ -613,12 +613,12 @@ func TestValidateModels(t *testing.T) {
 	}{
 		{
 			name:    "valid ordered models",
-			models:  types.OrderedModels{"openai/gpt-4"},
+			models:  model.OrderedModels{"openai/gpt-4"},
 			wantErr: false,
 		},
 		{
 			name: "valid weighted models",
-			models: types.WeightedModels{
+			models: model.WeightedModels{
 				"openai/gpt-4": 1.0,
 			},
 			wantErr: false,
