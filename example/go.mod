@@ -1,6 +1,6 @@
 module example
 
-go 1.21
+go 1.23.5
 
 require (
 	github.com/Not-Diamond/go-notdiamond v0.0.0

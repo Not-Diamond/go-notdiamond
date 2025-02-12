@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
@@ -40,9 +41,9 @@ func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error)
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	slog.Info("→ Executing request", "url", req.URL.String())
 
-	messages := extractMessagesFromRequest(req)
-	extractedModel := extractModelFromRequest(req)
-	extractedProvider := extractProviderFromRequest(req)
+	messages := request.ExtractMessagesFromRequest(req)
+	extractedModel := request.ExtractModelFromRequest(req)
+	extractedProvider := request.ExtractProviderFromRequest(req)
 	currentModel := extractedProvider + "/" + extractedModel
 
 	var lastErr error
@@ -139,7 +140,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		var resp *http.Response
 		var err error
 
-		if attempt == 0 && modelFull == extractProviderFromRequest(req)+"/"+extractModelFromRequest(req) {
+		if attempt == 0 && modelFull == request.ExtractProviderFromRequest(req)+"/"+request.ExtractModelFromRequest(req) {
 			currentReq := req.Clone(ctx)
 			resp, err = c.Client.Do(currentReq)
 		} else {
@@ -339,52 +340,4 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	}
 
 	return client.HttpClient.Client.Do(nextReq)
-}
-
-func extractModelFromRequest(req *http.Request) string {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return ""
-	}
-
-	req.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	var payload map[string]interface{}
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
-		return ""
-	}
-
-	if model, ok := payload["model"].(string); ok {
-		return model
-	}
-	return ""
-}
-
-func extractProviderFromRequest(req *http.Request) string {
-	url := req.URL.String()
-	if strings.Contains(url, "azure") {
-		return "azure"
-	} else if strings.Contains(url, "openai.com") {
-		return "openai"
-	}
-	return ""
-}
-
-func extractMessagesFromRequest(req *http.Request) []model.Message {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil
-	}
-
-	req.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	var payload struct {
-		Messages []model.Message `json:"messages"`
-	}
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
-		return nil
-	}
-	return payload.Messages
 }

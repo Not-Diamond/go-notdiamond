@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
@@ -608,7 +609,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
-			got := extractMessagesFromRequest(req)
+			got := request.ExtractMessagesFromRequest(req)
 
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("extractMessagesFromRequest() = %v, want %v", got, tt.expected)
@@ -661,7 +662,7 @@ func TestExtractProviderFromRequest(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
-			got := extractProviderFromRequest(req)
+			got := request.ExtractProviderFromRequest(req)
 			if got != tt.expected {
 				t.Errorf("extractProviderFromRequest() = %v, want %v", got, tt.expected)
 			}
@@ -717,7 +718,7 @@ func TestExtractModelFromRequest(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
-			got := extractModelFromRequest(req)
+			got := request.ExtractModelFromRequest(req)
 			if got != tt.expected {
 				t.Errorf("extractModelFromRequest() = %v, want %v", got, tt.expected)
 			}
