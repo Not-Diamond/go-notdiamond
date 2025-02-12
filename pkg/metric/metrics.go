@@ -69,6 +69,11 @@ func (mt *Tracker) CheckRecoveryTime(model string, config model.Config) error {
 // noOfCalls does not exceed avgLatency threshold). If the model is unhealthy, it is considered "blacklisted"
 // until recoveryTime has elapsed since the last call that exceeded the threshold.
 func (mt *Tracker) CheckModelHealth(model string, status string, config model.Config) error {
+	// Skip health check if ModelLatency is not configured for this model
+	if _, exists := config.ModelLatency[model]; !exists {
+		return nil
+	}
+
 	if config.ModelLatency[model].NoOfCalls > 10 {
 		config.ModelLatency[model].NoOfCalls = 10 // Enforce maximum
 	}

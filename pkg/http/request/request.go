@@ -10,6 +10,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
+// ExtractModelFromRequest extracts the model from the request body.
 func ExtractModelFromRequest(req *http.Request) string {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -30,6 +31,7 @@ func ExtractModelFromRequest(req *http.Request) string {
 	return ""
 }
 
+// ExtractProviderFromRequest extracts the provider from the request URL.
 func ExtractProviderFromRequest(req *http.Request) string {
 	url := req.URL.String()
 	if strings.Contains(url, "azure") {
@@ -40,6 +42,7 @@ func ExtractProviderFromRequest(req *http.Request) string {
 	return ""
 }
 
+// ExtractMessagesFromRequest extracts the messages from the request body.
 func ExtractMessagesFromRequest(req *http.Request) []model.Message {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {

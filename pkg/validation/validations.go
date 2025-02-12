@@ -10,6 +10,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
+// ValidateConfig validates the configuration for the NotDiamond client.
 func ValidateConfig(config model.Config) error {
 	if err := validateClients(config.Clients); err != nil {
 		return err
@@ -22,6 +23,7 @@ func ValidateConfig(config model.Config) error {
 	return validateStatusCodeRetry(config.StatusCodeRetry)
 }
 
+// validateClients validates the clients for the NotDiamond client.
 func validateClients(clients []http.Request) error {
 	if len(clients) == 0 {
 		return errors.New("at least one client must be provided")
@@ -29,6 +31,7 @@ func validateClients(clients []http.Request) error {
 	return nil
 }
 
+// validateModels validates the models for the NotDiamond client.
 func validateModels(models interface{}) error {
 	switch m := models.(type) {
 	case model.OrderedModels:
@@ -40,6 +43,7 @@ func validateModels(models interface{}) error {
 	}
 }
 
+// validateWeightedModels validates the weighted models for the NotDiamond client.
 func validateWeightedModels(models map[string]float64) error {
 	if len(models) == 0 {
 		return errors.New("at least one model must be provided")
@@ -52,6 +56,7 @@ func validateWeightedModels(models map[string]float64) error {
 	return validateModelNames(getModelNames(models))
 }
 
+// validateWeights validates the weights for the NotDiamond client.
 func validateWeights(models map[string]float64) error {
 	var totalWeight float64
 	for modelName, weight := range models {
@@ -69,6 +74,7 @@ func validateWeights(models map[string]float64) error {
 	return nil
 }
 
+// validateOrderedModels validates the ordered models for the NotDiamond client.
 func validateOrderedModels(models []string) error {
 	if len(models) == 0 {
 		return errors.New("at least one model must be provided")
@@ -76,6 +82,7 @@ func validateOrderedModels(models []string) error {
 	return validateModelNames(models)
 }
 
+// validateModelNames validates the model names for the NotDiamond client.
 func validateModelNames(models []string) error {
 	for _, model := range models {
 		if err := validateModelName(model); err != nil {
@@ -85,6 +92,7 @@ func validateModelNames(models []string) error {
 	return nil
 }
 
+// validateModelName validates the model name for the NotDiamond client.
 func validateModelName(model string) error {
 	if model == "" {
 		return errors.New("empty model name not allowed")
@@ -103,6 +111,7 @@ func validateModelName(model string) error {
 	return nil
 }
 
+// validateProvider validates the provider for the NotDiamond client.
 func validateProvider(provider string) error {
 	switch provider {
 	case string(model.ClientTypeAzure), string(model.ClientTypeOpenai):
@@ -112,6 +121,7 @@ func validateProvider(provider string) error {
 	}
 }
 
+// getModelNames gets the model names for the NotDiamond client.
 func getModelNames(models map[string]float64) []string {
 	names := make([]string, 0, len(models))
 	for name := range models {
@@ -120,6 +130,7 @@ func getModelNames(models map[string]float64) []string {
 	return names
 }
 
+// validateStatusCodeRetry validates the status code retry for the NotDiamond client.
 func validateStatusCodeRetry(retry interface{}) error {
 	if retry == nil {
 		return nil
@@ -145,6 +156,7 @@ func validateStatusCodeRetry(retry interface{}) error {
 	return nil
 }
 
+// validateStatusCodes validates the status codes for the NotDiamond client.
 func validateStatusCodes(codes map[string]int) error {
 	for code, retries := range codes {
 		statusCode, err := strconv.Atoi(code)
@@ -157,6 +169,45 @@ func validateStatusCodes(codes map[string]int) error {
 		if retries < 0 {
 			return fmt.Errorf("negative retry count %d for status code %s", retries, code)
 		}
+	}
+	return nil
+}
+
+// ValidateMessageSequence ensures messages alternate properly between roles
+func ValidateMessageSequence(messages []model.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	lastRole := ""
+	for i, msg := range messages {
+		currentRole := msg["role"]
+
+		// First message can be either system or user
+		if i == 0 {
+			if currentRole != "system" && currentRole != "user" {
+				return fmt.Errorf("first message must be either 'system' or 'user', got '%s'", currentRole)
+			}
+			lastRole = currentRole
+			continue
+		}
+
+		// After a system message, only user message is allowed
+		if lastRole == "system" && currentRole != "user" {
+			return fmt.Errorf("message after 'system' must be 'user', got '%s'", currentRole)
+		}
+
+		// After a user message, only assistant message is allowed
+		if lastRole == "user" && currentRole != "assistant" {
+			return fmt.Errorf("message after 'user' must be 'assistant', got '%s'", currentRole)
+		}
+
+		// After an assistant message, only user message is allowed
+		if lastRole == "assistant" && currentRole != "user" {
+			return fmt.Errorf("message after 'assistant' must be 'user', got '%s'", currentRole)
+		}
+
+		lastRole = currentRole
 	}
 	return nil
 }

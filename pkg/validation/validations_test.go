@@ -649,3 +649,98 @@ func TestValidateModels(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMessageSequence(t *testing.T) {
+	tests := []struct {
+		name        string
+		messages    []model.Message
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "empty messages",
+			messages: []model.Message{},
+			wantErr:  false,
+		},
+		{
+			name: "valid system->user->assistant sequence",
+			messages: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant"},
+				{"role": "user", "content": "Hello"},
+				{"role": "assistant", "content": "Hi there"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid user->assistant->user sequence",
+			messages: []model.Message{
+				{"role": "user", "content": "Hello"},
+				{"role": "assistant", "content": "Hi there"},
+				{"role": "user", "content": "How are you?"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid first message role",
+			messages: []model.Message{
+				{"role": "assistant", "content": "Hi there"},
+			},
+			wantErr:     true,
+			errContains: "first message must be either 'system' or 'user'",
+		},
+		{
+			name: "invalid sequence after system",
+			messages: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant"},
+				{"role": "assistant", "content": "Hi there"},
+			},
+			wantErr:     true,
+			errContains: "message after 'system' must be 'user'",
+		},
+		{
+			name: "invalid sequence after user",
+			messages: []model.Message{
+				{"role": "user", "content": "Hello"},
+				{"role": "user", "content": "How are you?"},
+			},
+			wantErr:     true,
+			errContains: "message after 'user' must be 'assistant'",
+		},
+		{
+			name: "invalid sequence after assistant",
+			messages: []model.Message{
+				{"role": "user", "content": "Hello"},
+				{"role": "assistant", "content": "Hi there"},
+				{"role": "assistant", "content": "How can I help?"},
+			},
+			wantErr:     true,
+			errContains: "message after 'assistant' must be 'user'",
+		},
+		{
+			name: "valid complex sequence",
+			messages: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant"},
+				{"role": "user", "content": "Hello"},
+				{"role": "assistant", "content": "Hi there"},
+				{"role": "user", "content": "How are you?"},
+				{"role": "assistant", "content": "I'm doing well, thanks!"},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateMessageSequence(tt.messages)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateMessageSequence() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("ValidateMessageSequence() error = %v, want error containing %v", err, tt.errContains)
+			}
+		})
+	}
+}
