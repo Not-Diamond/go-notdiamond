@@ -5,16 +5,15 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Not-Diamond/go-notdiamond/database"
-	"github.com/Not-Diamond/go-notdiamond/statistic"
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/database"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
+	"github.com/Not-Diamond/go-notdiamond/pkg/statistic"
 	"github.com/pkg/errors"
 )
 
 // metricsTracker manages a SQLite database that records call latencies per model.
 type Tracker struct {
-	db    database.Instance
-	debug bool
+	db database.Instance
 }
 
 // NewTracker initializes the SQLite database (stored in the file given by dbPath)
@@ -26,7 +25,7 @@ func NewTracker(dbPath string) (*Tracker, error) {
 	}
 
 	// Create the table if it does not exist.
-	err = db.CreateTables(true, "model_metrics", types.Message{
+	err = db.CreateTables(true, "model_metrics", model.Message{
 		"model":   "TEXT",
 		"latency": "REAL",
 		"status":  "TEXT",
@@ -50,7 +49,8 @@ func (mt *Tracker) RecordRecoveryTime(model string) error {
 	return mt.db.SetJSON("keystore", model, time.Now().UTC())
 }
 
-func (mt *Tracker) CheckRecoveryTime(model string, config types.Config) error {
+// CheckRecoveryTime checks if the model has recovered from a previous unhealthy state.
+func (mt *Tracker) CheckRecoveryTime(model string, config model.Config) error {
 	var latestTime time.Time
 
 	err := mt.db.GetJSON("keystore", model, &latestTime)
@@ -68,7 +68,7 @@ func (mt *Tracker) CheckRecoveryTime(model string, config types.Config) error {
 // checkModelHealth returns true if the model is healthy (i.e. its average latency over the last
 // noOfCalls does not exceed avgLatency threshold). If the model is unhealthy, it is considered "blacklisted"
 // until recoveryTime has elapsed since the last call that exceeded the threshold.
-func (mt *Tracker) CheckModelHealth(model string, status string, config types.Config) error {
+func (mt *Tracker) CheckModelHealth(model string, status string, config model.Config) error {
 	if config.ModelLatency[model].NoOfCalls > 10 {
 		config.ModelLatency[model].NoOfCalls = 10 // Enforce maximum
 	}

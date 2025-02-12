@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Not-Diamond/go-notdiamond/database"
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/database"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
 // setupTempDB sets the innerDB.DataFolder to a unique temporary directory for the test.
@@ -24,24 +24,24 @@ func setupTempDB(t *testing.T) {
 
 func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 	setupTempDB(t)
-	model := "openai/gpt-4o"
+	currentModel := "openai/gpt-4o"
 	metrics, err := NewTracker(":memory:" + t.Name())
 	if err != nil {
-		slog.Error("Failed to open database connection: %v", err)
+		slog.Error("Failed to open database connection", "error", err.Error())
 	}
 	// Record several latencies. For example, 1, 2, 3, and 4 seconds.
 	latencies := []float64{1.0, 2.0, 3.0, 4.0} // average = 2.5 seconds
 	for _, l := range latencies {
-		err := metrics.RecordLatency(model, l, "s")
+		err := metrics.RecordLatency(currentModel, l, "s")
 		if err != nil {
 			t.Errorf("recordLatency error: %v", err)
 		}
 	}
 
 	// Use thresholds: average_latency threshold = 3.0 sec, no_of_calls = 10, recovery_time = 10 minutes.
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			model: &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			currentModel: &model.RollingAverageLatency{
 				NoOfCalls:           10,
 				RecoveryTime:        10 * time.Minute,
 				AvgLatencyThreshold: 3.0,
@@ -49,33 +49,33 @@ func TestMetricsTracker_RecordAndHealth(t *testing.T) {
 		},
 	}
 
-	err = metrics.CheckModelHealth(model, "s", config)
+	err = metrics.CheckModelHealth(currentModel, "s", config)
 	if err != nil {
-		t.Errorf("Expected model %q to be healthy (avg=2.5 < threshold=3.0)", model)
+		t.Errorf("Expected model %q to be healthy (avg=2.5 < threshold=3.0)", currentModel)
 	}
 
 	// Record two high latency calls (e.g. 10 seconds each), which should push the average above the threshold.
 	highLatencies := []float64{10.0, 10.0}
 	for _, l := range highLatencies {
-		err := metrics.RecordLatency(model, l, "s")
+		err := metrics.RecordLatency(currentModel, l, "s")
 		if err != nil {
 			t.Errorf("recordLatency error: %v", err)
 		}
 	}
 
 	// Use thresholds: average_latency threshold = 3.0 sec, no_of_calls = 10, recovery_time = 10 minutes.
-	config = types.Config{
-		ModelLatency: types.ModelLatency{
-			model: &types.RollingAverageLatency{
+	config = model.Config{
+		ModelLatency: model.ModelLatency{
+			currentModel: &model.RollingAverageLatency{
 				NoOfCalls:           10,
 				RecoveryTime:        10 * time.Minute,
 				AvgLatencyThreshold: 3.0,
 			},
 		},
 	}
-	err = metrics.CheckModelHealth(model, "s", config)
+	err = metrics.CheckModelHealth(currentModel, "s", config)
 	if err != nil {
-		t.Errorf("Expected model %q to be unhealthy (average latency too high)", model)
+		t.Errorf("Expected model %q to be unhealthy (average latency too high)", currentModel)
 	}
 }
 
@@ -148,9 +148,9 @@ func TestCheckModelHealth_NoRecords(t *testing.T) {
 	}
 	defer mt.Close()
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"nonexistent_model": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"nonexistent_model": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 100,
 				NoOfCalls:           5,
 				RecoveryTime:        time.Minute,
@@ -182,9 +182,9 @@ func TestCheckModelHealth_UnderThreshold(t *testing.T) {
 		t.Fatalf("recordLatency() failed: %v", err)
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_under": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_under": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 100.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute,
@@ -221,9 +221,9 @@ func TestCheckModelHealth_InsufficientData(t *testing.T) {
 		t.Fatalf("insert failed: %v", err)
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_insufficient": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_insufficient": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 100.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute,
@@ -259,9 +259,9 @@ func TestCheckModelHealth_MovingAverage_Healthy(t *testing.T) {
 		}
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_healthy": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_healthy": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 100.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute,
@@ -297,9 +297,9 @@ func TestCheckModelHealth_MovingAverage_Unhealthy(t *testing.T) {
 		}
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_unhealthy": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_unhealthy": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 150.0, // threshold is lower than the moving average of ~220
 				NoOfCalls:           5,
 				RecoveryTime:        10 * time.Minute, // recent data: no recovery
@@ -336,9 +336,9 @@ func TestCheckModelHealth_MovingAverage_Recovered(t *testing.T) {
 		}
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_recovered": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_recovered": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 150.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute, // recovery period is short; data is old.
@@ -373,9 +373,9 @@ func TestCheckModelHealth_MaxNoOfCalls(t *testing.T) {
 		}
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_maxcalls": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_maxcalls": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 150.0,
 				NoOfCalls:           15, // Intend to use 15, but should be capped to 10.
 				RecoveryTime:        1 * time.Minute,
@@ -407,9 +407,9 @@ func TestCheckModelHealth_RecoveryTimeClamped(t *testing.T) {
 	}
 
 	// Set RecoveryTime to 2 hours; CheckModelHealth should clamp it to 1 hour.
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_clamped": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_clamped": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 100.0,
 				NoOfCalls:           5,
 				RecoveryTime:        2 * time.Hour, // Should be clamped to 1 hour.
@@ -451,9 +451,9 @@ func TestCheckModelHealth_InvalidTimestamp(t *testing.T) {
 		}
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_invalid": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_invalid": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 150.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute,
@@ -482,9 +482,9 @@ func TestCheckModelHealth_OverThreshold_NotRecovered(t *testing.T) {
 		t.Fatalf("recordLatency() failed: %v", err)
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_over": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_over": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 150.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute,
@@ -514,9 +514,9 @@ func TestCheckModelHealth_OverThreshold_Recovered(t *testing.T) {
 		t.Fatalf("Manual insert failed: %v", err)
 	}
 
-	config := types.Config{
-		ModelLatency: types.ModelLatency{
-			"model_recovered": &types.RollingAverageLatency{
+	config := model.Config{
+		ModelLatency: model.ModelLatency{
+			"model_recovered": &model.RollingAverageLatency{
 				AvgLatencyThreshold: 100.0,
 				NoOfCalls:           5,
 				RecoveryTime:        1 * time.Minute,

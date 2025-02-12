@@ -5,18 +5,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Not-Diamond/go-notdiamond/metric"
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
 type Transport struct {
 	Base           http.RoundTripper
 	client         *Client
 	metricsTracker *metric.Tracker
-	config         types.Config
+	config         model.Config
 }
 
-func NewTransport(config types.Config) (*Transport, error) {
+func NewTransport(config model.Config) (*Transport, error) {
 	metricsTracker, err := metric.NewTracker("metrics")
 	if err != nil {
 		return nil, err
@@ -53,11 +53,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.client.HttpClient.Do(req)
 }
 
-func buildModelProviders(models types.Models) map[string]map[string]bool {
+func buildModelProviders(models model.Models) map[string]map[string]bool {
 	modelProviders := make(map[string]map[string]bool)
 
 	switch m := models.(type) {
-	case types.WeightedModels:
+	case model.WeightedModels:
 		for modelFull := range m {
 			parts := strings.Split(modelFull, "/")
 			provider, model := parts[0], parts[1]
@@ -66,7 +66,7 @@ func buildModelProviders(models types.Models) map[string]map[string]bool {
 			}
 			modelProviders[model][provider] = true
 		}
-	case types.OrderedModels:
+	case model.OrderedModels:
 		for _, modelFull := range m {
 			parts := strings.Split(modelFull, "/")
 			provider, model := parts[0], parts[1]
@@ -79,7 +79,7 @@ func buildModelProviders(models types.Models) map[string]map[string]bool {
 	return modelProviders
 }
 
-func isOrderedModels(models types.Models) bool {
-	_, ok := models.(types.OrderedModels)
+func isOrderedModels(models model.Models) bool {
+	_, ok := models.(model.OrderedModels)
 	return ok
 }

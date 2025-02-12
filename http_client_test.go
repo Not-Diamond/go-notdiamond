@@ -13,27 +13,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Not-Diamond/go-notdiamond/metric"
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
 func TestCombineMessages(t *testing.T) {
 	tests := []struct {
 		name          string
-		modelMessages []types.Message
-		userMessages  []types.Message
-		expected      []types.Message
+		modelMessages []model.Message
+		userMessages  []model.Message
+		expected      []model.Message
 	}{
 		{
 			name: "both model and user messages",
-			modelMessages: []types.Message{
+			modelMessages: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 			},
-			userMessages: []types.Message{
+			userMessages: []model.Message{
 				{"role": "user", "content": "Hello"},
 				{"role": "assistant", "content": "Hi there"},
 			},
-			expected: []types.Message{
+			expected: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 				{"role": "user", "content": "Hello"},
 				{"role": "assistant", "content": "Hi there"},
@@ -41,40 +41,40 @@ func TestCombineMessages(t *testing.T) {
 		},
 		{
 			name:          "empty model messages",
-			modelMessages: []types.Message{},
-			userMessages: []types.Message{
+			modelMessages: []model.Message{},
+			userMessages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			expected: []types.Message{
+			expected: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
 		},
 		{
 			name: "empty user messages",
-			modelMessages: []types.Message{
+			modelMessages: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 			},
-			userMessages: []types.Message{},
-			expected: []types.Message{
+			userMessages: []model.Message{},
+			expected: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 			},
 		},
 		{
 			name:          "both empty messages",
-			modelMessages: []types.Message{},
-			userMessages:  []types.Message{},
-			expected:      []types.Message{},
+			modelMessages: []model.Message{},
+			userMessages:  []model.Message{},
+			expected:      []model.Message{},
 		},
 		{
 			name: "multiple model messages",
-			modelMessages: []types.Message{
+			modelMessages: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 				{"role": "system", "content": "Respond in English"},
 			},
-			userMessages: []types.Message{
+			userMessages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			expected: []types.Message{
+			expected: []model.Message{
 				{"role": "system", "content": "You are a helpful assistant"},
 				{"role": "system", "content": "Respond in English"},
 				{"role": "user", "content": "Hello"},
@@ -99,9 +99,9 @@ func TestTryWithRetries(t *testing.T) {
 		maxRetries     map[string]int
 		timeout        map[string]float64
 		backoff        map[string]float64
-		modelMessages  map[string][]types.Message
-		modelLatency   types.ModelLatency
-		messages       []types.Message
+		modelMessages  map[string][]model.Message
+		modelLatency   model.ModelLatency
+		messages       []model.Message
 		setupTransport func() *mockTransport
 		expectedCalls  int
 		expectError    bool
@@ -116,11 +116,11 @@ func TestTryWithRetries(t *testing.T) {
 			timeout: map[string]float64{
 				"openai/gpt-4": 10.0,
 			},
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: types.ModelLatency{
-				"openai/gpt-4": &types.RollingAverageLatency{
+			modelLatency: model.ModelLatency{
+				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -151,11 +151,11 @@ func TestTryWithRetries(t *testing.T) {
 			backoff: map[string]float64{
 				"openai/gpt-4": 0.1,
 			},
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: types.ModelLatency{
-				"openai/gpt-4": &types.RollingAverageLatency{
+			modelLatency: model.ModelLatency{
+				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -192,11 +192,11 @@ func TestTryWithRetries(t *testing.T) {
 			backoff: map[string]float64{
 				"openai/gpt-4": 0.1,
 			},
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: types.ModelLatency{
-				"openai/gpt-4": &types.RollingAverageLatency{
+			modelLatency: model.ModelLatency{
+				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -223,11 +223,11 @@ func TestTryWithRetries(t *testing.T) {
 			timeout: map[string]float64{
 				"openai/gpt-4": 10.0,
 			},
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
-			modelLatency: types.ModelLatency{
-				"openai/gpt-4": &types.RollingAverageLatency{
+			modelLatency: model.ModelLatency{
+				"openai/gpt-4": &model.RollingAverageLatency{
 					AvgLatencyThreshold: 3.5,
 					NoOfCalls:           5,               // Max 10
 					RecoveryTime:        5 * time.Minute, // Max 1h
@@ -259,7 +259,7 @@ func TestTryWithRetries(t *testing.T) {
 			}
 			httpClient := &NotDiamondHttpClient{
 				Client: &http.Client{Transport: transport},
-				config: types.Config{
+				config: model.Config{
 					MaxRetries:    tt.maxRetries,
 					Timeout:       tt.timeout,
 					Backoff:       tt.backoff,
@@ -353,7 +353,7 @@ func TestTryNextModel(t *testing.T) {
 	tests := []struct {
 		name          string
 		modelFull     string
-		messages      []types.Message
+		messages      []model.Message
 		setupClient   func() (*Client, *mockTransport)
 		expectedURL   string
 		expectedBody  map[string]interface{}
@@ -365,7 +365,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "successful azure request",
 			modelFull: "azure/gpt-4",
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -390,8 +390,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: types.Config{
-							ModelMessages: map[string][]types.Message{
+						config: model.Config{
+							ModelMessages: map[string][]model.Message{
 								"azure/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -417,7 +417,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "successful openai request",
 			modelFull: "openai/gpt-4",
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -441,8 +441,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: types.Config{
-							ModelMessages: map[string][]types.Message{
+						config: model.Config{
+							ModelMessages: map[string][]model.Message{
 								"openai/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -467,7 +467,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "provider not found",
 			modelFull: "unknown/gpt-4",
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -484,8 +484,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: types.Config{
-							ModelMessages: map[string][]types.Message{
+						config: model.Config{
+							ModelMessages: map[string][]model.Message{
 								"unknown/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -500,7 +500,7 @@ func TestTryNextModel(t *testing.T) {
 		{
 			name:      "http client error",
 			modelFull: "openai/gpt-4",
-			messages: []types.Message{
+			messages: []model.Message{
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
@@ -519,8 +519,8 @@ func TestTryNextModel(t *testing.T) {
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: types.Config{
-							ModelMessages: map[string][]types.Message{
+						config: model.Config{
+							ModelMessages: map[string][]model.Message{
 								"openai/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
@@ -569,7 +569,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 	tests := []struct {
 		name     string
 		payload  []byte
-		expected []types.Message
+		expected []model.Message
 	}{
 		{
 			name: "valid messages",
@@ -579,7 +579,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 					{"role": "assistant", "content": "Hi there"}
 				]
 			}`),
-			expected: []types.Message{
+			expected: []model.Message{
 				{"role": "user", "content": "Hello"},
 				{"role": "assistant", "content": "Hi there"},
 			},
@@ -587,7 +587,7 @@ func TestExtractMessagesFromRequest(t *testing.T) {
 		{
 			name:     "empty messages array",
 			payload:  []byte(`{"messages": []}`),
-			expected: []types.Message{},
+			expected: []model.Message{},
 		},
 		{
 			name:     "invalid json",
@@ -837,7 +837,7 @@ func TestGetMaxRetriesForStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &NotDiamondHttpClient{
-				config: types.Config{
+				config: model.Config{
 					MaxRetries:      tt.maxRetries,
 					StatusCodeRetry: tt.statusCodeRetry,
 				},
@@ -876,11 +876,11 @@ func TestDo(t *testing.T) {
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: types.Config{
+					config: model.Config{
 						MaxRetries: map[string]int{"openai/gpt-4": 3},
 						Timeout:    map[string]float64{"openai/gpt-4": 30.0},
-						ModelLatency: types.ModelLatency{
-							"openai/gpt-4": &types.RollingAverageLatency{
+						ModelLatency: model.ModelLatency{
+							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           5,               // Max 10
 								RecoveryTime:        5 * time.Minute, // Max 1h
@@ -908,7 +908,7 @@ func TestDo(t *testing.T) {
 			// Create NotDiamondClient and add it to context
 			notDiamondClient := &Client{
 				HttpClient: client,
-				models:     types.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
 				isOrdered:  true,
 			}
 			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
@@ -977,15 +977,15 @@ func TestDoWithLatencies(t *testing.T) {
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: types.Config{
+					config: model.Config{
 						// Using a window size of 5, so with one record (insufficient) the model is healthy.
-						ModelLatency: types.ModelLatency{
-							"openai/gpt-4": &types.RollingAverageLatency{
+						ModelLatency: model.ModelLatency{
+							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           5,               // window size
 								RecoveryTime:        5 * time.Minute, // recovery period
 							},
-							"azure/gpt-4": &types.RollingAverageLatency{
+							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           5,               // window size
 								RecoveryTime:        5 * time.Minute, // recovery period
@@ -1017,15 +1017,15 @@ func TestDoWithLatencies(t *testing.T) {
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: types.Config{
+					config: model.Config{
 						// Set window size to 1 so that the measured latency is used immediately.
-						ModelLatency: types.ModelLatency{
-							"openai/gpt-4": &types.RollingAverageLatency{
+						ModelLatency: model.ModelLatency{
+							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
 							},
-							"azure/gpt-4": &types.RollingAverageLatency{
+							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
@@ -1064,15 +1064,15 @@ func TestDoWithLatencies(t *testing.T) {
 				}
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: types.Config{
+					config: model.Config{
 						// Set window size to 1 so that the latency measurement is used directly.
-						ModelLatency: types.ModelLatency{
-							"openai/gpt-4": &types.RollingAverageLatency{
+						ModelLatency: model.ModelLatency{
+							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
 							},
-							"azure/gpt-4": &types.RollingAverageLatency{
+							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
 								NoOfCalls:           1,               // immediate decision
 								RecoveryTime:        1 * time.Minute, // recovery period
@@ -1104,7 +1104,7 @@ func TestDoWithLatencies(t *testing.T) {
 			// Create a NotDiamondClient and add it to the context.
 			notDiamondClient := &Client{
 				HttpClient: client,
-				models:     types.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
 				isOrdered:  true,
 			}
 			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)

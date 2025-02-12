@@ -4,23 +4,23 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Not-Diamond/go-notdiamond/database"
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/database"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
 func TestInit(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  types.Config
+		config  model.Config
 		wantErr bool
 	}{
 		{
 			name: "valid ordered models config",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: types.OrderedModels{
+				Models: model.OrderedModels{
 					"openai/gpt-4",
 					"azure/gpt-4",
 				},
@@ -37,11 +37,11 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "valid weighted models config",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: types.WeightedModels{
+				Models: model.WeightedModels{
 					"openai/gpt-4": 0.6,
 					"azure/gpt-4":  0.4,
 				},
@@ -58,8 +58,8 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - no clients",
-			config: types.Config{
-				Models: types.OrderedModels{
+			config: model.Config{
+				Models: model.OrderedModels{
 					"openai/gpt-4",
 				},
 			},
@@ -67,7 +67,7 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - no models",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
@@ -76,11 +76,11 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - incorrect model format",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: types.OrderedModels{
+				Models: model.OrderedModels{
 					"invalid-model-format",
 				},
 			},
@@ -88,11 +88,11 @@ func TestInit(t *testing.T) {
 		},
 		{
 			name: "invalid - unknown provider",
-			config: types.Config{
+			config: model.Config{
 				Clients: []http.Request{
 					*&http.Request{},
 				},
-				Models: types.OrderedModels{
+				Models: model.OrderedModels{
 					"unknown/gpt-4",
 				},
 			},

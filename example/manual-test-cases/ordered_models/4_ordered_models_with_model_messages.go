@@ -1,16 +1,16 @@
 package test_ordered
 
 import (
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
-var OrderedModelsWithModelMessages = types.Config{
-	Models: types.OrderedModels{
+var OrderedModelsWithModelMessages = model.Config{
+	Models: model.OrderedModels{
 		"openai/gpt-4o-mini",
 		"azure/gpt-4o-mini",
 		"azure/gpt-4o",
 	},
-	ModelMessages: map[string][]types.Message{
+	ModelMessages: map[string][]model.Message{
 		"openai/gpt-4o-mini": {
 			{"role": "user", "content": "Please respond only with answer in romanian."},
 		},

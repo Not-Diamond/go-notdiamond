@@ -13,17 +13,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Not-Diamond/go-notdiamond/metric"
-	"github.com/Not-Diamond/go-notdiamond/types"
+	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
+	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
 type NotDiamondHttpClient struct {
 	*http.Client
-	config         types.Config
+	config         model.Config
 	metricsTracker *metric.Tracker
 }
 
-func NewNotDiamondHttpClient(config types.Config) (*NotDiamondHttpClient, error) {
+func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error) {
 	metricsTracker, err := metric.NewTracker("metrics")
 	if err != nil {
 		slog.Error("failed to create metrics tracker", "error", err)
@@ -41,9 +41,9 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	slog.Info("→ Executing request", "url", req.URL.String())
 
 	messages := extractMessagesFromRequest(req)
-	model := extractModelFromRequest(req)
-	provider := extractProviderFromRequest(req)
-	currentModel := provider + "/" + model
+	extractedModel := extractModelFromRequest(req)
+	extractedProvider := extractProviderFromRequest(req)
+	currentModel := extractedProvider + "/" + extractedModel
 
 	var lastErr error
 	originalCtx := req.Context()
@@ -52,9 +52,9 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 		var modelsToTry []string
 
 		if client.isOrdered {
-			modelsToTry = client.models.(types.OrderedModels)
+			modelsToTry = client.models.(model.OrderedModels)
 		} else {
-			modelsToTry = getWeightedModelsList(client.models.(types.WeightedModels))
+			modelsToTry = getWeightedModelsList(client.models.(model.WeightedModels))
 		}
 
 		// Move the requested model to the front of the slice
@@ -104,7 +104,7 @@ func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCo
 	return 1
 }
 
-func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Request, messages []types.Message, originalCtx context.Context) (*http.Response, error) {
+func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Request, messages []model.Message, originalCtx context.Context) (*http.Response, error) {
 	var lastErr error
 	var lastStatusCode int
 
@@ -224,7 +224,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 	return nil, lastErr
 }
 
-func getWeightedModelsList(weights types.WeightedModels) []string {
+func getWeightedModelsList(weights model.WeightedModels) []string {
 	// Create a slice to store models with their cumulative weights
 	type weightedModel struct {
 		model            string
@@ -280,8 +280,8 @@ func getWeightedModelsList(weights types.WeightedModels) []string {
 	return result
 }
 
-func combineMessages(modelMessages []types.Message, userMessages []types.Message) []types.Message {
-	combinedMessages := make([]types.Message, 0)
+func combineMessages(modelMessages []model.Message, userMessages []model.Message) []model.Message {
+	combinedMessages := make([]model.Message, 0)
 	if len(modelMessages) > 0 {
 		combinedMessages = append(combinedMessages, modelMessages...)
 	}
@@ -289,7 +289,7 @@ func combineMessages(modelMessages []types.Message, userMessages []types.Message
 	return combinedMessages
 }
 
-func tryNextModel(client *Client, modelFull string, messages []types.Message, ctx context.Context) (*http.Response, error) {
+func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
 	nextProvider, nextModel := parts[0], parts[1]
 
@@ -371,7 +371,7 @@ func extractProviderFromRequest(req *http.Request) string {
 	return ""
 }
 
-func extractMessagesFromRequest(req *http.Request) []types.Message {
+func extractMessagesFromRequest(req *http.Request) []model.Message {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil
@@ -380,7 +380,7 @@ func extractMessagesFromRequest(req *http.Request) []types.Message {
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var payload struct {
-		Messages []types.Message `json:"messages"`
+		Messages []model.Message `json:"messages"`
 	}
 	err = json.Unmarshal(body, &payload)
 	if err != nil {

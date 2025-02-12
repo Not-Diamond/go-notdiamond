@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Not-Diamond/go-notdiamond/database"
+	"github.com/Not-Diamond/go-notdiamond/pkg/database"
 )
 
 func TestMain(m *testing.M) {
