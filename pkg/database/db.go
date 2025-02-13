@@ -282,15 +282,6 @@ func Open(name string, readOnly bool) (*Instance, error) {
 	return d, nil
 }
 
-// debugDB sets the logger's level based on the debugMode flag.
-func (d *Instance) debugDB(debugMode bool) {
-	if debugMode {
-		slog.Info("debugDB")
-	} else {
-		slog.Info("debugDB")
-	}
-}
-
 // CloseConnection terminates the Instance connection and releases the file lock.
 func (d *Instance) CloseConnection() error {
 	if d.isClosed {

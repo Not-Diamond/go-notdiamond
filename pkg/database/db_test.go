@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -393,8 +394,20 @@ func TestCreateTables(t *testing.T) {
 					return
 				}
 				expected := []string{"id", "timestamp", "value", "tag"}
-				if len(cols) != len(expected) {
-					t.Errorf("Expected %v columns, got %v", expected, cols)
+				if !reflect.DeepEqual(cols, expected) {
+					t.Errorf("Expected columns %v, got %v", expected, cols)
+				}
+
+				// Verify index exists
+				rows, err := d.Query("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name=?",
+					tableName, tableName+"_idx")
+				if err != nil {
+					t.Errorf("Failed to check index: %v", err)
+					return
+				}
+				defer rows.Close()
+				if !rows.Next() {
+					t.Error("Index was not created")
 				}
 			},
 		},
@@ -407,15 +420,62 @@ func TestCreateTables(t *testing.T) {
 			},
 			wantErr: false,
 			validate: func(t *testing.T, d *Instance, tableName string) {
-				// Verify columns exist
 				cols, err := d.GetColumns(tableName)
 				if err != nil {
 					t.Errorf("Failed to get columns: %v", err)
 					return
 				}
 				expected := []string{"key", "value"}
-				if len(cols) != len(expected) {
-					t.Errorf("Expected %v columns, got %v", expected, cols)
+				if !reflect.DeepEqual(cols, expected) {
+					t.Errorf("Expected columns %v, got %v", expected, cols)
+				}
+
+				// Verify index exists
+				rows, err := d.Query("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name=?",
+					tableName, tableName+"_idx")
+				if err != nil {
+					t.Errorf("Failed to check index: %v", err)
+					return
+				}
+				defer rows.Close()
+				if !rows.Next() {
+					t.Error("Index was not created")
+				}
+			},
+		},
+		{
+			name:       "invalid table name",
+			timeSeries: false,
+			tableName:  "invalid;table",
+			columns: map[string]string{
+				"value": "TEXT",
+			},
+			wantErr: true,
+		},
+		{
+			name:       "invalid column type",
+			timeSeries: false,
+			tableName:  "test_invalid",
+			columns: map[string]string{
+				"value": "TEXT PRIMARY KEY", // This will fail because we already defined a PRIMARY KEY
+			},
+			wantErr: true,
+		},
+		{
+			name:       "empty columns",
+			timeSeries: false,
+			tableName:  "test_empty",
+			columns:    map[string]string{},
+			wantErr:    false,
+			validate: func(t *testing.T, d *Instance, tableName string) {
+				cols, err := d.GetColumns(tableName)
+				if err != nil {
+					t.Errorf("Failed to get columns: %v", err)
+					return
+				}
+				expected := []string{"key"}
+				if !reflect.DeepEqual(cols, expected) {
+					t.Errorf("Expected columns %v, got %v", expected, cols)
 				}
 			},
 		},
@@ -433,12 +493,13 @@ func TestCreateTables(t *testing.T) {
 			}
 			defer db.CloseConnection()
 
-			if err := db.CreateTables(tt.timeSeries, tt.tableName, tt.columns); (err != nil) != tt.wantErr {
+			err = db.CreateTables(tt.timeSeries, tt.tableName, tt.columns)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateTables() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
-			if tt.validate != nil {
+			if !tt.wantErr && tt.validate != nil {
 				tt.validate(t, db, tt.tableName)
 			}
 		})
@@ -593,6 +654,131 @@ func TestDeleteItem(t *testing.T) {
 			// Run validation if provided
 			if tt.validate != nil {
 				tt.validate(t, db)
+			}
+		})
+	}
+}
+
+func TestQuery(t *testing.T) {
+	// Use a temporary directory for test isolation
+	tmpDir := t.TempDir()
+	originalDataFolder := DataFolder
+	DataFolder = tmpDir
+	defer func() {
+		DataFolder = originalDataFolder
+	}()
+
+	tests := []struct {
+		name        string
+		setup       func(*Instance) error
+		query       string
+		args        []interface{}
+		wantResult  []string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid query",
+			setup: func(db *Instance) error {
+				return db.CreateTables(false, "test_table", map[string]string{
+					"value": "TEXT",
+				})
+			},
+			query:      "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+			args:       []interface{}{"test_table"},
+			wantResult: []string{"test_table"},
+			wantErr:    false,
+		},
+		{
+			name:        "invalid SQL syntax",
+			query:       "INVALID SQL QUERY",
+			args:        []interface{}{},
+			wantErr:     true,
+			errContains: "syntax error",
+		},
+		{
+			name:        "invalid table name",
+			query:       "SELECT * FROM nonexistent_table",
+			args:        []interface{}{},
+			wantErr:     true,
+			errContains: "no such table",
+		},
+		{
+			name: "query with multiple parameters",
+			setup: func(db *Instance) error {
+				if err := db.CreateTables(false, "test_params", map[string]string{
+					"value": "TEXT",
+				}); err != nil {
+					return err
+				}
+				return db.Exec("INSERT INTO test_params (key, value) VALUES (?, ?)", "test_key", "test_value")
+			},
+			query:      "SELECT value FROM test_params WHERE key = ?",
+			args:       []interface{}{"test_key"},
+			wantResult: []string{"test_value"},
+			wantErr:    false,
+		},
+		{
+			name:        "prepare statement error",
+			query:       "SELECT * FROM (invalid syntax", // This will cause Prepare to fail
+			args:        []interface{}{},
+			wantErr:     true,
+			errContains: "incomplete input",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a new database for each test
+			db, err := Open("test_query_"+tt.name, false)
+			if err != nil {
+				t.Fatalf("Failed to open database: %v", err)
+			}
+			defer func() {
+				if err := db.CloseConnection(); err != nil {
+					t.Errorf("Failed to close database: %v", err)
+				}
+			}()
+
+			// Run setup if provided
+			if tt.setup != nil {
+				if err := tt.setup(db); err != nil {
+					t.Fatalf("Setup failed: %v", err)
+				}
+			}
+
+			// Execute query
+			rows, err := db.Query(tt.query, tt.args...)
+
+			// Check error expectations
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Query() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if err != nil {
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+				return
+			}
+
+			// If we expect results, verify them
+			if tt.wantResult != nil {
+				var results []string
+				for rows.Next() {
+					var result string
+					if err := rows.Scan(&result); err != nil {
+						t.Errorf("Failed to scan row: %v", err)
+						continue
+					}
+					results = append(results, result)
+				}
+				rows.Close()
+
+				if !reflect.DeepEqual(results, tt.wantResult) {
+					t.Errorf("Query() results = %v, want %v", results, tt.wantResult)
+				}
 			}
 		})
 	}
