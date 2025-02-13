@@ -175,6 +175,7 @@ config := notdiamond.Config{
 		"429": 3, // Retry rate limit errors 3 times
 	},
 }
+```
 
 ## Average Rolling Latency Fallback
 

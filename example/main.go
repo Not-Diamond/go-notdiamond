@@ -33,7 +33,7 @@ func main() {
 		log.Fatalf("Failed to create azure request: %v", err)
 	}
 
-	config := test_ordered.OrderedModelsWithLatency
+	config := test_ordered.OrderedModelsWithStatusCodeRetry
 
 	config.Clients = []http.Request{
 		*openaiRequest,
