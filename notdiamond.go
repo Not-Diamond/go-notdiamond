@@ -1,9 +1,6 @@
 package notdiamond
 
 import (
-	"bytes"
-	"context"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -75,22 +72,4 @@ func Init(config model.Config) (*Client, error) {
 	}
 
 	return client, nil
-}
-
-// Do Extend and added context to the request
-// So the package can be used without manually passing not diamond client to the ctx
-func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	ctx := context.WithValue(context.Background(), clientKey, c)
-
-	newReq := req.Clone(ctx)
-	if req.Body != nil {
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			return nil, err
-		}
-		req.Body = io.NopCloser(bytes.NewBuffer(body)) // Restore original request body
-		newReq.Body = io.NopCloser(bytes.NewBuffer(body))
-	}
-
-	return c.HttpClient.Do(newReq)
 }

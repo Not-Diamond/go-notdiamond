@@ -3,6 +3,7 @@ package notdiamond
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -396,6 +397,113 @@ func TestTransport_RoundTrip(t *testing.T) {
 			// Check request modifications if specified
 			if tt.checkRequest != nil && mockTransport.lastRequest != nil {
 				tt.checkRequest(t, mockTransport.lastRequest)
+			}
+		})
+	}
+}
+
+func TestUpdateRequestWithCombinedMessages(t *testing.T) {
+	tests := []struct {
+		name           string
+		modelMessages  []model.Message
+		messages       []model.Message
+		extractedModel string
+		initialBody    string
+		wantErr        bool
+		checkRequest   func(t *testing.T, req *http.Request)
+	}{
+		{
+			name: "successfully combines messages",
+			modelMessages: []model.Message{
+				{"role": "system", "content": "You are a helpful assistant"},
+			},
+			messages: []model.Message{
+				{"role": "user", "content": "Hello"},
+			},
+			extractedModel: "gpt-4",
+			initialBody:    `{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}`,
+			checkRequest: func(t *testing.T, req *http.Request) {
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatalf("Failed to read request body: %v", err)
+				}
+
+				var payload map[string]interface{}
+				if err := json.Unmarshal(body, &payload); err != nil {
+					t.Fatalf("Failed to unmarshal request body: %v", err)
+				}
+
+				messages, ok := payload["messages"].([]interface{})
+				if !ok {
+					t.Fatal("Messages field is not an array")
+				}
+
+				if len(messages) != 2 {
+					t.Errorf("Expected 2 messages, got %d", len(messages))
+				}
+
+				model, ok := payload["model"].(string)
+				if !ok || model != "gpt-4" {
+					t.Errorf("Expected model to be 'gpt-4', got %v", model)
+				}
+
+				// Check content length was set correctly
+				expectedLength := int64(len(body))
+				if req.ContentLength != expectedLength {
+					t.Errorf("Expected ContentLength %d, got %d", expectedLength, req.ContentLength)
+				}
+			},
+		},
+		{
+			name:          "handles empty model messages",
+			modelMessages: []model.Message{},
+			messages: []model.Message{
+				{"role": "user", "content": "Hello"},
+			},
+			extractedModel: "gpt-4",
+			initialBody:    `{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}`,
+			checkRequest: func(t *testing.T, req *http.Request) {
+				body, _ := io.ReadAll(req.Body)
+				var payload map[string]interface{}
+				json.Unmarshal(body, &payload)
+
+				messages, _ := payload["messages"].([]interface{})
+				if len(messages) != 1 {
+					t.Errorf("Expected 1 message, got %d", len(messages))
+				}
+			},
+		},
+		{
+			name: "invalid message sequence",
+			modelMessages: []model.Message{
+				{"role": "assistant", "content": "Invalid first message"},
+			},
+			messages: []model.Message{
+				{"role": "user", "content": "Hello"},
+			},
+			extractedModel: "gpt-4",
+			initialBody:    `{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}`,
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", "http://example.com",
+				bytes.NewBufferString(tt.initialBody))
+			if err != nil {
+				t.Fatalf("Failed to create request: %v", err)
+			}
+
+			err = updateRequestWithCombinedMessages(req, tt.modelMessages, tt.messages, tt.extractedModel)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("updateRequestWithCombinedMessages() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if err == nil && tt.checkRequest != nil {
+				tt.checkRequest(t, req)
 			}
 		})
 	}

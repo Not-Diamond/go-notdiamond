@@ -105,11 +105,23 @@ func (mt *Tracker) CheckModelHealth(model string, status string, config model.Co
 		return nil
 	}
 
-	if config.ModelLatency[model].NoOfCalls > 10 {
-		config.ModelLatency[model].NoOfCalls = 10 // Enforce maximum
+	// Enforce maximum number of calls
+	maxLimit := config.ModelLimits.MaxNoOfCalls
+	if maxLimit == 0 {
+		maxLimit = 10000
 	}
-	if config.ModelLatency[model].RecoveryTime > time.Hour {
-		config.ModelLatency[model].RecoveryTime = time.Hour // Enforce maximum
+	maxRecoveryTime := config.ModelLimits.MaxRecoveryTime
+	if maxRecoveryTime == 0 {
+		maxRecoveryTime = time.Hour
+	}
+
+	if config.ModelLatency[model].NoOfCalls > maxLimit {
+		slog.Info("🚨 Enforcing maximum number of calls", "model", model, "noOfCalls", config.ModelLatency[model].NoOfCalls, "maxLimit", maxLimit)
+		config.ModelLatency[model].NoOfCalls = maxLimit // Enforce maximum
+	}
+	if config.ModelLatency[model].RecoveryTime > maxRecoveryTime {
+		slog.Info("🚨 Enforcing maximum recovery time", "model", model, "recoveryTime", config.ModelLatency[model].RecoveryTime, "maxRecoveryTime", maxRecoveryTime)
+		config.ModelLatency[model].RecoveryTime = maxRecoveryTime // Enforce maximum
 	}
 
 	// First check if we're still in recovery period

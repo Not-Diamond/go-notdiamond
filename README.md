@@ -180,3 +180,17 @@ config := notdiamond.Config{
 	},
 }
 ```
+
+## Model Limits
+
+Configure custom limits for each model:
+
+```go
+config := notdiamond.Config{
+	// ... other config ...
+	ModelLimits: model.ModelLimits{
+		MaxNoOfCalls:    10000,
+		MaxRecoveryTime: time.Hour * 24,
+	},
+}
+```

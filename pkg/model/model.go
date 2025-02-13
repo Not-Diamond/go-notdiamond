@@ -46,6 +46,11 @@ type CustomInvalidType struct{}
 
 func (CustomInvalidType) isModels() {}
 
+type ModelLimits struct {
+	MaxNoOfCalls    int
+	MaxRecoveryTime time.Duration
+}
+
 // Config is the configuration for the NotDiamond client.
 type Config struct {
 	Clients         []http.Request
@@ -56,4 +61,5 @@ type Config struct {
 	Backoff         map[string]float64
 	StatusCodeRetry interface{}
 	ModelLatency    ModelLatency
+	ModelLimits     ModelLimits
 }
