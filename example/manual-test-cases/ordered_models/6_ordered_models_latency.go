@@ -29,4 +29,8 @@ var OrderedModelsWithLatency = model.Config{
 			RecoveryTime:        3 * time.Second,
 		},
 	},
+	ModelLimits: model.ModelLimits{
+		MaxNoOfCalls:    10000,
+		MaxRecoveryTime: time.Hour * 24,
+	},
 }

@@ -49,7 +49,7 @@ transport, err := notdiamond.NewTransport(config)
 
 // Create a standard http.Client with our transport
 client := &http.Client{
-Transport: transport,
+	Transport: transport,
 }
 
 // Prepare Payload
@@ -173,9 +173,9 @@ config := notdiamond.Config{
 	// ... other config ...
 	ModelLatency: map[string]notdiamond.RollingAverageLatency{
 		"azure/gpt-4": {
-			Threshold: 0.5,
-			RecoveryTime: 1 * time.Minute,
-			NoOfCalls: 5,
+			AvgLatencyThreshold: 3.2,
+			NoOfCalls:           10,
+			RecoveryTime:        3 * time.Second,
 		},
 	},
 }

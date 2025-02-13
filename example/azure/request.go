@@ -1,11 +1,11 @@
-package openai
+package azure
 
 import (
 	"errors"
 	"net/http"
 )
 
-// NewRequest creates a new request for the OpenAI API.
+// NewRequest creates a new request for the Azure API.
 func NewRequest(url string, apiKey string) (*http.Request, error) {
 	if url == "" {
 		return nil, errors.New("url cannot be empty")
@@ -17,7 +17,7 @@ func NewRequest(url string, apiKey string) (*http.Request, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("api-key", apiKey)
 
 	return req, nil
 }

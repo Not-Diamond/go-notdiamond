@@ -24,6 +24,17 @@ func NewTracker(dbPath string) (*Tracker, error) {
 		return nil, err
 	}
 
+	// Enable WAL mode and set busy timeout
+	err = db.Exec("PRAGMA journal_mode=WAL")
+	if err != nil {
+		return nil, fmt.Errorf("failed to enable WAL mode: %v", err)
+	}
+
+	err = db.Exec("PRAGMA busy_timeout=5000") // 5 second timeout
+	if err != nil {
+		return nil, fmt.Errorf("failed to set busy timeout: %v", err)
+	}
+
 	// Create the table if it does not exist.
 	err = db.CreateTables(true, "model_metrics", model.Message{
 		"model":   "TEXT",
@@ -41,7 +52,10 @@ func NewTracker(dbPath string) (*Tracker, error) {
 func (mt *Tracker) RecordLatency(model string, latency float64, status string) error {
 	err := mt.db.Exec("INSERT INTO model_metrics(timestamp, model, latency, status) VALUES(?, ?, ?, ?)",
 		time.Now().UTC(), model, latency, status)
-	return err
+	if err != nil {
+		return fmt.Errorf("RecordLatency failed: %v", err)
+	}
+	return nil
 }
 
 // recordRecoveryTime records the recovery time for a given model.
@@ -55,13 +69,30 @@ func (mt *Tracker) CheckRecoveryTime(model string, config model.Config) error {
 
 	err := mt.db.GetJSON("keystore", model, &latestTime)
 	if err != nil {
-
+		// If no recovery time is recorded, the model is considered healthy
+		return nil
 	}
 
 	if time.Since(latestTime) < config.ModelLatency[model].RecoveryTime {
-		return errors.Errorf("Model hasn't recover yet, skipping")
+		return errors.Errorf("Model %s is still in recovery period for %v",
+			model, config.ModelLatency[model].RecoveryTime-time.Since(latestTime))
 	}
 
+	// Clear the recovery time since the recovery period has elapsed
+	err = mt.db.Exec("DELETE FROM keystore WHERE key = ?", model)
+	if err != nil {
+		slog.Error("Failed to clear recovery time", "error", err)
+		return nil
+	}
+
+	// Clear old latency data so the model starts fresh
+	err = mt.db.Exec("DELETE FROM model_metrics WHERE model = ?", model)
+	if err != nil {
+		slog.Error("Failed to clear old latency data", "error", err)
+		return nil
+	}
+
+	slog.Info(fmt.Sprintf("Model %s has recovered and latency data has been reset", model))
 	return nil
 }
 
@@ -81,7 +112,13 @@ func (mt *Tracker) CheckModelHealth(model string, status string, config model.Co
 		config.ModelLatency[model].RecoveryTime = time.Hour // Enforce maximum
 	}
 
-	// executeQuery the most recent noOfCalls calls for the model.
+	// First check if we're still in recovery period
+	err := mt.CheckRecoveryTime(model, config)
+	if err != nil {
+		return err // Still in recovery period
+	}
+
+	// If we're not in recovery, check the latency average
 	raw_query := `
 	SELECT timestamp, latency FROM model_metrics
 	WHERE model = '%s' and status LIKE '%%' || '%s' || '%%'
@@ -142,15 +179,17 @@ func (mt *Tracker) CheckModelHealth(model string, status string, config model.Co
 
 	// If the latest moving average exceeds the threshold, check the recovery time.
 	if latestMovingAvg > config.ModelLatency[model].AvgLatencyThreshold {
-		// Use the timestamp of the most recent record (now at the end after reversal)
-		latestTimestamp := stats.Data[len(stats.Data)-1].Timestamp
-		if time.Since(latestTimestamp) < config.ModelLatency[model].RecoveryTime {
-			// High moving average and recent data: model is unhealthy.
-			return errors.Errorf("High moving average and recent data: model is unhealthy.")
-		} else {
-			slog.Info(fmt.Sprintf("Model %s has recovered, but moving average: %.2f is above threshold: %.2f", model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold))
+		// Record the recovery time when we first detect the model is unhealthy
+		err := mt.RecordRecoveryTime(model)
+		if err != nil {
+			slog.Error("Failed to record recovery time", "error", err)
 		}
+
+		// High moving average: model is unhealthy
+		return errors.Errorf("Model %s is unhealthy: moving average %.2f exceeds threshold %.2f",
+			model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold)
 	}
+
 	// Otherwise, the model is healthy.
 	slog.Info(fmt.Sprintf("✓ Model %s is healthy, moving average: %.2f is below threshold: %.2f", model, latestMovingAvg, config.ModelLatency[model].AvgLatencyThreshold))
 	return nil

@@ -135,7 +135,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		if _err != nil {
 			cancel()
 			lastErr = _err
-			slog.Error(_err.Error())
+			slog.Error("Model health check failed", "model", modelFull, "error", _err.Error())
+			// Don't retry if model is unhealthy or in recovery period
+			if strings.Contains(_err.Error(), "is unhealthy") || strings.Contains(_err.Error(), "recovery period") {
+				return nil, _err
+			}
 			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
 				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
 			}
@@ -374,11 +378,28 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	}
 
 	nextReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+
+	// Initialize headers if nil
+	if nextReq.Header == nil {
+		nextReq.Header = make(http.Header)
+	}
 	nextReq.Header.Set("Content-Type", "application/json")
 
+	// Extract API key from either header format
+	var apiKey string
+	authHeader := nextReq.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		apiKey = nextReq.Header.Get("api-key")
+	}
+
 	if nextProvider == "openai" {
-		nextReq.Header.Set("Authorization", "Bearer "+nextReq.Header.Get("api-key"))
+		nextReq.Header.Set("Authorization", "Bearer "+apiKey)
 		nextReq.Header.Del("api-key")
+	} else if nextProvider == "azure" {
+		nextReq.Header.Set("api-key", apiKey)
+		nextReq.Header.Del("Authorization")
 	}
 
 	return client.HttpClient.Client.Do(nextReq)
