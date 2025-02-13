@@ -150,7 +150,9 @@ config := notdiamond.Config{
 
 ## Status Code Retries
 
-You can configure specific retry behavior for different HTTP status codes, either globally or per model:
+You can configure specific retry behavior for different HTTP status codes, either globally or per model.
+
+Per model retry behavior:
 
 ```go
 config := notdiamond.Config{
@@ -164,6 +166,16 @@ config := notdiamond.Config{
 }
 ```
 
+Global retry behavior:
+
+````go
+config := notdiamond.Config{
+	// ... other config ...
+	StatusCodeRetry: map[string]int{
+		"429": 3, // Retry rate limit errors 3 times
+	},
+}
+
 ## Average Rolling Latency Fallback
 
 Configure custom average rolling latency threshold and recovery time for each model:
@@ -173,13 +185,13 @@ config := notdiamond.Config{
 	// ... other config ...
 	ModelLatency: map[string]notdiamond.RollingAverageLatency{
 		"azure/gpt-4": {
-			AvgLatencyThreshold: 3.2,
-			NoOfCalls:           10,
-			RecoveryTime:        3 * time.Second,
+			AvgLatencyThreshold: 3.2, // Average latency threshold, if average latency is greater than this, fallback to other models
+			NoOfCalls:           10, // Number of calls to make to get the average latency
+			RecoveryTime:        3 * time.Second, // Time to wait before retrying
 		},
 	},
 }
-```
+````
 
 ## Model Limits
 
