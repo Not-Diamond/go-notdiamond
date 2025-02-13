@@ -778,3 +778,102 @@ func TestCheckModelHealth_RecoveryTimeClearing(t *testing.T) {
 		t.Error("Expected recovery time to be cleared, but it still exists")
 	}
 }
+
+func TestCheckModelHealth_EnforceModelLimits(t *testing.T) {
+	setupTempDB(t)
+
+	mt, err := NewTracker("test_metrics_limits")
+	if err != nil {
+		t.Fatalf("NewTracker() failed: %v", err)
+	}
+	defer mt.Close()
+
+	// Test cases for model limits
+	tests := []struct {
+		name             string
+		noOfCalls        int
+		recoveryTime     time.Duration
+		maxNoOfCalls     int
+		maxRecoveryTime  time.Duration
+		expectedCalls    int
+		expectedRecovery time.Duration
+	}{
+		{
+			name:             "within limits",
+			noOfCalls:        5000,
+			recoveryTime:     30 * time.Minute,
+			maxNoOfCalls:     10000,
+			maxRecoveryTime:  time.Hour,
+			expectedCalls:    5000,
+			expectedRecovery: 30 * time.Minute,
+		},
+		{
+			name:             "exceed max calls",
+			noOfCalls:        15000,
+			recoveryTime:     30 * time.Minute,
+			maxNoOfCalls:     10000,
+			maxRecoveryTime:  time.Hour,
+			expectedCalls:    10000,
+			expectedRecovery: 30 * time.Minute,
+		},
+		{
+			name:             "exceed recovery time",
+			noOfCalls:        5000,
+			recoveryTime:     2 * time.Hour,
+			maxNoOfCalls:     10000,
+			maxRecoveryTime:  time.Hour,
+			expectedCalls:    5000,
+			expectedRecovery: time.Hour,
+		},
+		{
+			name:             "default limits when zero",
+			noOfCalls:        15000,
+			recoveryTime:     2 * time.Hour,
+			maxNoOfCalls:     0, // Should default to 10000
+			maxRecoveryTime:  0, // Should default to 1 hour
+			expectedCalls:    10000,
+			expectedRecovery: time.Hour,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := model.Config{
+				ModelLatency: model.ModelLatency{
+					"test_model": &model.RollingAverageLatency{
+						AvgLatencyThreshold: 100.0,
+						NoOfCalls:           tt.noOfCalls,
+						RecoveryTime:        tt.recoveryTime,
+					},
+				},
+				ModelLimits: model.ModelLimits{
+					MaxNoOfCalls:    tt.maxNoOfCalls,
+					MaxRecoveryTime: tt.maxRecoveryTime,
+				},
+			}
+
+			// Record a latency to ensure the model exists in the database
+			if err := mt.RecordLatency("test_model", 50, "success"); err != nil {
+				t.Fatalf("RecordLatency() failed: %v", err)
+			}
+
+			err := mt.CheckModelHealth("test_model", "success", config)
+			if err != nil {
+				t.Fatalf("CheckModelHealth() failed: %v", err)
+			}
+
+			// Verify the enforced limits
+			if config.ModelLatency["test_model"].NoOfCalls != tt.expectedCalls {
+				t.Errorf("NoOfCalls = %d, want %d",
+					config.ModelLatency["test_model"].NoOfCalls,
+					tt.expectedCalls)
+			}
+
+			if config.ModelLatency["test_model"].RecoveryTime != tt.expectedRecovery {
+				t.Errorf("RecoveryTime = %v, want %v",
+					config.ModelLatency["test_model"].RecoveryTime,
+					tt.expectedRecovery)
+			}
+		})
+	}
+}

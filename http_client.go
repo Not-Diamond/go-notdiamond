@@ -43,7 +43,7 @@ func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error)
 
 // Do executes a request.
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
-	slog.Info("→ Executing request", "url", req.URL.String())
+	slog.Info("🔍 Executing request", "url", req.URL.String())
 
 	messages := request.ExtractMessagesFromRequest(req)
 	extractedModel := request.ExtractModelFromRequest(req)
@@ -77,7 +77,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 				return resp, nil
 			} else {
 				lastErr = err
-				slog.Error("✕ Attempt failed", "model", modelFull, "error", err.Error())
+				slog.Error("❌ Attempt failed", "model", modelFull, "error", err.Error())
 			}
 		}
 	}
@@ -121,7 +121,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			break
 		}
 
-		slog.Info(fmt.Sprintf("↺ Request %d of %d for model %s", attempt+1, maxRetries, modelFull))
+		slog.Info(fmt.Sprintf("🔄 Request %d of %d for model %s", attempt+1, maxRetries, modelFull))
 
 		timeout := 100.0
 		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
@@ -164,7 +164,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		if err != nil {
 			cancel()
 			lastErr = err
-			slog.Error("! Request", "failed", lastErr)
+			slog.Error("❌ Request", "failed", lastErr)
 			// Record the latency in SQLite.
 			recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "failed")
 			if recErr != nil {
@@ -224,7 +224,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					http.StatusText(resp.StatusCode),
 					string(body))
 			}
-			slog.Error("! Request", "failed", lastErr)
+			slog.Error("❌ Request", "failed", lastErr)
 		}
 
 		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
@@ -342,7 +342,7 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	for _, clientReq := range client.clients {
 		if strings.Contains(clientReq.URL.String(), nextProvider) {
 			nextReq = clientReq.Clone(ctx)
-			slog.Info("↝ Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+			slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
 			break
 		}
 	}

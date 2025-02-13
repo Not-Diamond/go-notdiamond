@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -25,6 +26,7 @@ type Transport struct {
 
 // NewTransport creates a new Transport.
 func NewTransport(config model.Config) (*Transport, error) {
+	slog.Info("🏁 Initializing Transport")
 	if err := validation.ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -67,24 +69,9 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Combine with model messages if they exist
 	if modelMessages, exists := t.config.ModelMessages[currentModel]; exists {
-		combinedMessages, err := combineMessages(modelMessages, messages)
-		if err != nil {
+		if err := updateRequestWithCombinedMessages(req, modelMessages, messages, extractedModel); err != nil {
 			return nil, err
 		}
-
-		// Update request body with combined messages
-		payload := map[string]interface{}{
-			"model":    extractedModel,
-			"messages": combinedMessages,
-		}
-
-		jsonData, err := json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-
-		req.Body = io.NopCloser(bytes.NewBuffer(jsonData))
-		req.ContentLength = int64(len(jsonData))
 	}
 
 	// Add client to context and proceed with request
@@ -92,6 +79,28 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.WithContext(ctx)
 
 	return t.client.HttpClient.Do(req)
+}
+
+// updateRequestWithCombinedMessages updates the request with combined messages.
+func updateRequestWithCombinedMessages(req *http.Request, modelMessages []model.Message, messages []model.Message, extractedModel string) error {
+	combinedMessages, err := combineMessages(modelMessages, messages)
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]interface{}{
+		"model":    extractedModel,
+		"messages": combinedMessages,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	req.ContentLength = int64(len(jsonData))
+	return nil
 }
 
 func buildModelProviders(models model.Models) map[string]map[string]bool {

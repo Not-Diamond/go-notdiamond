@@ -156,30 +156,40 @@ func (d *Instance) SetJSON(tableName, key string, value interface{}) error {
 
 // deleteItem removes the record identified by key from the specified table.
 func (d *Instance) deleteItem(tableName, key string) error {
+	// First check if the table exists
+	rows, err := d.Query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
+	if err != nil {
+		return errors.Wrap(err, "deleteItem table check")
+	}
+	exists := rows.Next()
+	rows.Close() // Close rows before starting transaction
+
+	if !exists {
+		return errors.Errorf("table %s does not exist", tableName)
+	}
+
 	tx, err := d.db.Begin()
 	if err != nil {
 		return errors.Wrap(err, "deleteItem Begin")
 	}
+
 	stmt, err := tx.Prepare(fmt.Sprintf("DELETE FROM %s WHERE key = ?", tableName))
 	if err != nil {
-		err := tx.Rollback()
-		if err != nil {
-			return err
-		}
+		tx.Rollback()
 		return errors.Wrap(err, "deleteItem Prepare")
 	}
 	defer stmt.Close()
 
 	if _, err := stmt.Exec(key); err != nil {
-		err := tx.Rollback()
-		if err != nil {
-			return err
-		}
+		tx.Rollback()
 		return errors.Wrap(err, "deleteItem Exec")
 	}
+
 	if err := tx.Commit(); err != nil {
+		tx.Rollback()
 		return errors.Wrap(err, "deleteItem Commit")
 	}
+
 	return nil
 }
 
@@ -266,7 +276,7 @@ func Open(name string, readOnly bool) (*Instance, error) {
 		if err := d.CreateTables(false, "keystore", map[string]string{"value": "TEXT"}); err != nil {
 			return nil, errors.Wrap(err, "Open CreateTables")
 		}
-		slog.Info("Created initial keystore table in new Instance")
+		slog.Info("📦 Created initial keystore table in new Instance")
 	}
 
 	return d, nil
