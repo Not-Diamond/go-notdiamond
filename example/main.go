@@ -12,6 +12,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 
+	"example/azure"
 	test_ordered "example/manual-test-cases/ordered_models"
 	"example/openai"
 )
@@ -27,7 +28,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create openai request: %v", err)
 	}
-	azureRequest, err := openai.NewRequest(azureEndpoint, azureApiKey)
+	azureRequest, err := azure.NewRequest(azureEndpoint, azureApiKey)
 	if err != nil {
 		log.Fatalf("Failed to create azure request: %v", err)
 	}
@@ -62,7 +63,7 @@ func main() {
 		log.Fatalf("Failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completionsss", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}

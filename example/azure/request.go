@@ -1,4 +1,4 @@
-package openai
+package azure
 
 import (
 	"net/http"
@@ -11,7 +11,7 @@ func NewRequest(url string, apiKey string) (*http.Request, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("api-key", apiKey)
 
 	return req, nil
 }

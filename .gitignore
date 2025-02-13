@@ -60,3 +60,6 @@ debug.test
 .air.toml
 
 *.db
+*.db-shm
+*.db-wal
+*.db-journal

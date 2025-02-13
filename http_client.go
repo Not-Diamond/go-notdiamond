@@ -385,9 +385,21 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	}
 	nextReq.Header.Set("Content-Type", "application/json")
 
+	// Extract API key from either header format
+	var apiKey string
+	authHeader := nextReq.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		apiKey = nextReq.Header.Get("api-key")
+	}
+
 	if nextProvider == "openai" {
-		nextReq.Header.Set("Authorization", "Bearer "+nextReq.Header.Get("api-key"))
+		nextReq.Header.Set("Authorization", "Bearer "+apiKey)
 		nextReq.Header.Del("api-key")
+	} else if nextProvider == "azure" {
+		nextReq.Header.Set("api-key", apiKey)
+		nextReq.Header.Del("Authorization")
 	}
 
 	return client.HttpClient.Client.Do(nextReq)
