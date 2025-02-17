@@ -24,16 +24,24 @@ type Transport struct {
 	config         model.Config
 }
 
-// NewTransport creates a new Transport.
+// NewTransport creates a new Transport with metrics tracking.
 func NewTransport(config model.Config) (*Transport, error) {
 	slog.Info("🏁 Initializing Transport")
 	if err := validation.ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	metricsTracker, err := metric.NewTracker("metrics")
+	// Initialize metrics tracker with Redis configuration from config
+	var metricsTracker *metric.Tracker
+	var err error
+	if config.RedisConfig != nil {
+		metricsTracker, err = metric.NewTracker(config.RedisConfig.Addr)
+	} else {
+		// Use default Redis configuration
+		metricsTracker, err = metric.NewTracker("localhost:6379")
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create metrics tracker: %w", err)
 	}
 
 	baseClient := &http.Client{Transport: http.DefaultTransport}

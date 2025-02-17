@@ -3,6 +3,8 @@ package model
 import (
 	"net/http"
 	"time"
+
+	"github.com/Not-Diamond/go-notdiamond/pkg/redis"
 )
 
 // Models is a type that can be used to represent a list of models.
@@ -62,4 +64,5 @@ type Config struct {
 	StatusCodeRetry interface{}
 	ModelLatency    ModelLatency
 	ModelLimits     ModelLimits
+	RedisConfig     *redis.Config // Redis configuration for metrics tracking
 }

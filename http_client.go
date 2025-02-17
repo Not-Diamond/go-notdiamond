@@ -28,7 +28,14 @@ type NotDiamondHttpClient struct {
 
 // NewNotDiamondHttpClient creates a new NotDiamond HTTP client.
 func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error) {
-	metricsTracker, err := metric.NewTracker("metrics")
+	var metricsTracker *metric.Tracker
+	var err error
+
+	if config.RedisConfig != nil {
+		metricsTracker, err = metric.NewTracker(config.RedisConfig.Addr)
+	} else {
+		metricsTracker, err = metric.NewTracker("localhost:6379")
+	}
 	if err != nil {
 		slog.Error("failed to create metrics tracker", "error", err)
 		return nil, err
@@ -131,41 +138,41 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		ctx, cancel := context.WithTimeout(originalCtx, time.Duration(timeout*float64(time.Second)))
 		defer cancel()
 
-		_err := c.metricsTracker.CheckModelHealth(modelFull, "success", c.config)
-		if _err != nil {
+		// Check model health
+		healthy, healthErr := c.metricsTracker.CheckModelHealth(modelFull, c.config)
+		if healthErr != nil {
 			cancel()
-			lastErr = _err
-			slog.Error("Model health check failed", "model", modelFull, "error", _err.Error())
-			// Don't retry if model is unhealthy or in recovery period
-			if strings.Contains(_err.Error(), "is unhealthy") || strings.Contains(_err.Error(), "recovery period") {
-				return nil, _err
-			}
-			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
-				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
-			}
-			continue
+			lastErr = healthErr
+			slog.Error("Model health check failed", "model", modelFull, "error", healthErr.Error())
+			return nil, fmt.Errorf("model health check failed: %w", healthErr)
+		}
+		if !healthy {
+			cancel()
+			lastErr = fmt.Errorf("model %s is unhealthy", modelFull)
+			slog.Info("🔄 Fallback to next model", "reason", "unhealthy", "model", modelFull)
+			return nil, lastErr
 		}
 
 		startTime := time.Now()
 		var resp *http.Response
-		var err error
+		var reqErr error
 
 		if attempt == 0 && modelFull == request.ExtractProviderFromRequest(req)+"/"+request.ExtractModelFromRequest(req) {
 			currentReq := req.Clone(ctx)
-			resp, err = c.Client.Do(currentReq)
+			resp, reqErr = c.Client.Do(currentReq)
 		} else {
 			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
-				resp, err = tryNextModel(client, modelFull, messages, ctx)
+				resp, reqErr = tryNextModel(client, modelFull, messages, ctx)
 			}
 		}
 
 		elapsed := time.Since(startTime).Seconds()
 
-		if err != nil {
+		if reqErr != nil {
 			cancel()
-			lastErr = err
+			lastErr = reqErr
 			slog.Error("❌ Request", "failed", lastErr)
-			// Record the latency in SQLite.
+			// Record the latency in Redis
 			recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "failed")
 			if recErr != nil {
 				slog.Error("error", "recording latency", recErr)
@@ -178,9 +185,9 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 		if resp != nil {
 			body, readErr := io.ReadAll(resp.Body)
-			err := resp.Body.Close()
-			if err != nil {
-				return nil, err
+			closeErr := resp.Body.Close()
+			if closeErr != nil {
+				return nil, closeErr
 			}
 			cancel()
 
@@ -191,7 +198,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 			lastStatusCode = resp.StatusCode
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				// Record the latency in SQLite.
+				// Record the latency in Redis
 				recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "success")
 				if recErr != nil {
 					slog.Error("recording latency", "error", recErr)
@@ -212,7 +219,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					Type    string `json:"type"`
 				} `json:"error"`
 			}
-			if err := json.Unmarshal(body, &errorResponse); err == nil && errorResponse.Error.Message != "" {
+			if unmarshalErr := json.Unmarshal(body, &errorResponse); unmarshalErr == nil && errorResponse.Error.Message != "" {
 				lastErr = fmt.Errorf("with status %d (%s): %s",
 					resp.StatusCode,
 					http.StatusText(resp.StatusCode),
