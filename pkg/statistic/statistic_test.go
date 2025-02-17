@@ -12,18 +12,10 @@ func almostEqual(a, b, tol float64) bool {
 	return math.Abs(a-b) < tol
 }
 
-func TestNewStatistics(t *testing.T) {
-	stats := NewStatistics()
-	if stats == nil {
-		t.Fatal("NewStatistics returned nil")
-	}
-	if len(stats.Data) != 0 {
-		t.Fatalf("Expected new Statistics to have 0 data points, got %d", len(stats.Data))
-	}
-}
-
 func TestAddAndSum(t *testing.T) {
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	stats.Add(time.Now(), 1.0)
 	stats.Add(time.Now(), 2.0)
 	stats.Add(time.Now(), 3.0)
@@ -36,7 +28,9 @@ func TestAddAndSum(t *testing.T) {
 }
 
 func TestAverageEmpty(t *testing.T) {
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	_, err := stats.average()
 	if err == nil {
 		t.Error("Expected error for Average on empty data, got nil")
@@ -44,7 +38,9 @@ func TestAverageEmpty(t *testing.T) {
 }
 
 func TestAverageNonEmpty(t *testing.T) {
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	stats.Add(time.Now(), 1.0)
 	stats.Add(time.Now(), 2.0)
 	stats.Add(time.Now(), 3.0)
@@ -60,7 +56,9 @@ func TestAverageNonEmpty(t *testing.T) {
 
 func TestMovingAverage_WindowSizeOne(t *testing.T) {
 	// With window size 1, each moving average value should equal the original value.
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	baseTime := time.Now()
 	values := []float64{1, 2, 3, 4, 5}
 	for i, v := range values {
@@ -88,7 +86,9 @@ func TestMovingAverage_WindowSizeThree(t *testing.T) {
 	// index 2: average(1,2,3) = 2.0
 	// index 3: average(2,3,4) = 3.0
 	// index 4: average(3,4,5) = 4.0
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	baseTime := time.Now()
 	values := []float64{1, 2, 3, 4, 5}
 	for i, v := range values {
@@ -112,7 +112,9 @@ func TestMovingAverage_WindowSizeThree(t *testing.T) {
 
 func TestMovingAverage_WindowSizeLargerThanData(t *testing.T) {
 	// When window size exceeds the number of data points, the average is computed on the available points.
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	baseTime := time.Now()
 	values := []float64{10, 20}
 	for i, v := range values {
@@ -131,7 +133,9 @@ func TestMovingAverage_WindowSizeLargerThanData(t *testing.T) {
 }
 
 func TestMovingAverage_InvalidWindow(t *testing.T) {
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	stats.Add(time.Now(), 1.0)
 	_, err := stats.MovingAverage(0)
 	if err == nil {
@@ -140,7 +144,9 @@ func TestMovingAverage_InvalidWindow(t *testing.T) {
 }
 
 func TestMinAndMax(t *testing.T) {
-	stats := NewStatistics()
+	stats := &Statistic{
+		Data: []DataPoint{},
+	}
 	// Test on empty data: expect error.
 	if _, err := stats.Min(); err == nil {
 		t.Error("Expected error for Min on empty data, got nil")
