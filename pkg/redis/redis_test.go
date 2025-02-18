@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,5 +310,29 @@ func TestRecordLatencyInvalidJSON(t *testing.T) {
 	err := client.RecordLatency(ctx, model, math.Inf(1), "success")
 	if err == nil {
 		t.Error("Expected error for invalid JSON data, got nil")
+	}
+}
+func TestRecordLatencyRedisErrors(t *testing.T) {
+	client, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer client.Close()
+
+	ctx := context.Background()
+	model := "test-model"
+	latency := 0.5
+	status := "success"
+
+	// Test Redis error
+	mr.SetError("simulated Redis error")
+	err := client.RecordLatency(ctx, model, latency, status)
+	if err == nil || !strings.Contains(err.Error(), "simulated Redis error") {
+		t.Errorf("Expected Redis error, got: %v", err)
+	}
+
+	// Clear error and verify successful operation
+	mr.SetError("")
+	err = client.RecordLatency(ctx, model, latency, status)
+	if err != nil {
+		t.Errorf("Expected successful operation, got error: %v", err)
 	}
 }

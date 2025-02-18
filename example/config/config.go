@@ -2,7 +2,6 @@ package config
 
 import (
 	test_ordered "example/manual-test-cases/ordered_models"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -49,11 +48,10 @@ func LoadConfig() Config {
 		},
 	}
 
-	fmt.Printf("Redis Configuration: %+v\n", cfg.RedisConfig)
 	return cfg
 }
 
 // GetModelConfig returns a model configuration for testing
 func GetModelConfig() model.Config {
-	return test_ordered.OrderedModels
+	return test_ordered.OrderedModelsWithLatency
 }
