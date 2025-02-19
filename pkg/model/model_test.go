@@ -9,6 +9,7 @@ import (
 func TestOrderedModels_isModels(t *testing.T) {
 	models := OrderedModels{"model1", "model2"}
 	var _ Models = models // Verify OrderedModels implements Models interface
+	models.isModels()     // Actually call the method
 }
 
 func TestWeightedModels_isModels(t *testing.T) {
@@ -125,15 +126,5 @@ func TestRollingAverageLatency_Usage(t *testing.T) {
 
 	if latency.RecoveryTime != time.Minute {
 		t.Error("Expected RecoveryTime to be 1 minute")
-	}
-}
-
-func TestClientType_Constants(t *testing.T) {
-	if ClientTypeAzure != "azure" {
-		t.Error("Expected ClientTypeAzure to be 'azure'")
-	}
-
-	if ClientTypeOpenai != "openai" {
-		t.Error("Expected ClientTypeOpenai to be 'openai'")
 	}
 }

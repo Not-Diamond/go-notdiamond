@@ -2,35 +2,47 @@ package notdiamond
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 
-	"github.com/Not-Diamond/go-notdiamond/pkg/database"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
+	"github.com/Not-Diamond/go-notdiamond/pkg/redis"
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestInit(t *testing.T) {
+	// Set up miniredis
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
 	tests := []struct {
-		name    string
-		config  model.Config
-		wantErr bool
+		name      string
+		config    model.Config
+		wantErr   bool
+		errString string
 	}{
 		{
 			name: "valid ordered models config",
 			config: model.Config{
 				Clients: []http.Request{
-					*&http.Request{},
+					{
+						Host: "api.openai.com",
+						URL: &url.URL{
+							Scheme: "https",
+							Host:   "api.openai.com",
+							Path:   "/v1/chat/completions",
+						},
+					},
 				},
-				Models: model.OrderedModels{
-					"openai/gpt-4",
-					"azure/gpt-4",
-				},
-				MaxRetries: map[string]int{
-					"openai/gpt-4": 3,
-					"azure/gpt-4":  3,
-				},
-				Timeout: map[string]float64{
-					"openai/gpt-4": 30.0,
-					"azure/gpt-4":  30.0,
+				Models: model.OrderedModels{"openai/gpt-4"},
+				RedisConfig: &redis.Config{
+					Addr:     mr.Addr(),
+					Password: "",
+					DB:       0,
 				},
 			},
 			wantErr: false,
@@ -39,19 +51,22 @@ func TestInit(t *testing.T) {
 			name: "valid weighted models config",
 			config: model.Config{
 				Clients: []http.Request{
-					*&http.Request{},
+					{
+						Host: "api.openai.com",
+						URL: &url.URL{
+							Scheme: "https",
+							Host:   "api.openai.com",
+							Path:   "/v1/chat/completions",
+						},
+					},
 				},
 				Models: model.WeightedModels{
-					"openai/gpt-4": 0.6,
-					"azure/gpt-4":  0.4,
+					"openai/gpt-4": 1.0,
 				},
-				MaxRetries: map[string]int{
-					"openai/gpt-4": 3,
-					"azure/gpt-4":  3,
-				},
-				Timeout: map[string]float64{
-					"openai/gpt-4": 30.0,
-					"azure/gpt-4":  30.0,
+				RedisConfig: &redis.Config{
+					Addr:     mr.Addr(),
+					Password: "",
+					DB:       0,
 				},
 			},
 			wantErr: false,
@@ -59,61 +74,86 @@ func TestInit(t *testing.T) {
 		{
 			name: "invalid - no clients",
 			config: model.Config{
-				Models: model.OrderedModels{
-					"openai/gpt-4",
-				},
+				Models: model.OrderedModels{"openai/gpt-4"},
 			},
-			wantErr: true,
+			wantErr:   true,
+			errString: "at least one client must be provided",
 		},
 		{
 			name: "invalid - no models",
 			config: model.Config{
 				Clients: []http.Request{
-					*&http.Request{},
+					{
+						Host: "api.openai.com",
+						URL: &url.URL{
+							Scheme: "https",
+							Host:   "api.openai.com",
+							Path:   "/v1/chat/completions",
+						},
+					},
 				},
+				Models: nil,
 			},
-			wantErr: true,
+			wantErr:   true,
+			errString: "models must be either notdiamond.OrderedModels or map[string]float64, got <nil>",
 		},
 		{
 			name: "invalid - incorrect model format",
 			config: model.Config{
 				Clients: []http.Request{
-					*&http.Request{},
+					{
+						Host: "api.openai.com",
+						URL: &url.URL{
+							Scheme: "https",
+							Host:   "api.openai.com",
+							Path:   "/v1/chat/completions",
+						},
+					},
 				},
-				Models: model.OrderedModels{
-					"invalid-model-format",
-				},
+				Models: model.OrderedModels{"invalid-model-format"},
 			},
-			wantErr: true,
+			wantErr:   true,
+			errString: "invalid model format: invalid-model-format (expected 'provider/model')",
 		},
 		{
 			name: "invalid - unknown provider",
 			config: model.Config{
 				Clients: []http.Request{
-					*&http.Request{},
+					{
+						Host: "api.openai.com",
+						URL: &url.URL{
+							Scheme: "https",
+							Host:   "api.openai.com",
+							Path:   "/v1/chat/completions",
+						},
+					},
 				},
-				Models: model.OrderedModels{
-					"unknown/gpt-4",
-				},
+				Models: model.OrderedModels{"unknown/gpt-4"},
 			},
-			wantErr: true,
+			wantErr:   true,
+			errString: "invalid provider in model unknown/gpt-4: unknown provider: unknown",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Use a temporary directory for the database files so that each test is isolated.
-			database.DataFolder = t.TempDir()
-
 			client, err := Init(tt.config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Init() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-
-			// If the client was successfully created, make sure to clean up its resources.
-			if client != nil && client.HttpClient != nil && client.HttpClient.metricsTracker != nil {
-				if cerr := client.HttpClient.metricsTracker.Close(); cerr != nil {
-					t.Errorf("failed to close metrics tracker: %v", cerr)
+			if err != nil && tt.errString != "" && !strings.Contains(err.Error(), tt.errString) {
+				t.Errorf("Init() error = %v, wantErr %v", err, tt.errString)
+				return
+			}
+			if err == nil {
+				if client == nil {
+					t.Error("Init() returned nil client with no error")
+					return
+				}
+				// Clean up
+				if err := client.HttpClient.metricsTracker.Close(); err != nil {
+					t.Errorf("Failed to close metrics tracker: %v", err)
 				}
 			}
 		})

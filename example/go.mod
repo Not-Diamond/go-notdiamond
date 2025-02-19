@@ -2,17 +2,14 @@ module example
 
 go 1.23.5
 
-require (
-	github.com/Not-Diamond/go-notdiamond v0.0.0
-	github.com/joho/godotenv v1.5.1
-)
+require github.com/Not-Diamond/go-notdiamond v0.0.0
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.24 // indirect
-	github.com/mr-tron/base58 v1.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/schollz/sqlite3dump v1.3.1 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
+	github.com/redis/go-redis/v9 v9.5.1 // indirect
 )
 
 replace github.com/Not-Diamond/go-notdiamond => ../

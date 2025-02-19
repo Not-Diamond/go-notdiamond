@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"reflect"
 	"sort"
@@ -16,6 +15,8 @@ import (
 	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
+	"github.com/Not-Diamond/go-notdiamond/pkg/redis"
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestCombineMessages(t *testing.T) {
@@ -267,12 +268,20 @@ func TestTryWithRetries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Set up miniredis
+			mr, err := miniredis.Run()
+			if err != nil {
+				t.Fatalf("Failed to create miniredis: %v", err)
+			}
+			defer mr.Close()
+
 			transport := tt.setupTransport()
 			req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`))
-			metrics, err := metric.NewTracker(":memory:" + tt.name)
+			metrics, err := metric.NewTracker(mr.Addr())
 			if err != nil {
-				log.Fatalf("Failed to open database connection: %v", err)
+				t.Fatalf("Failed to create metrics tracker: %v", err)
 			}
+
 			httpClient := &NotDiamondHttpClient{
 				Client: &http.Client{Transport: transport},
 				config: model.Config{
@@ -385,6 +394,12 @@ func TestTryNextModel(t *testing.T) {
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				req, _ := http.NewRequest("POST", "https://myresource.azure.openai.com", nil)
 				req.Header.Set("api-key", "test-key")
 				transport := &mockTransport{
@@ -396,10 +411,11 @@ func TestTryNextModel(t *testing.T) {
 					},
 				}
 
-				metrics, err := metric.NewTracker(":memory:" + "successful_azure_request")
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
+
 				return &Client{
 					clients: []http.Request{*req},
 					HttpClient: &NotDiamondHttpClient{
@@ -411,6 +427,9 @@ func TestTryNextModel(t *testing.T) {
 								"azure/gpt-4": {
 									{"role": "system", "content": "Hello"},
 								},
+							},
+							RedisConfig: &redis.Config{
+								Addr: mr.Addr(),
 							},
 						},
 						metricsTracker: metrics,
@@ -437,6 +456,12 @@ func TestTryNextModel(t *testing.T) {
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				req, _ := http.NewRequest("POST", "https://api.openai.com", nil)
 				req.Header.Set("api-key", "test-key")
 				transport := &mockTransport{
@@ -447,9 +472,9 @@ func TestTryNextModel(t *testing.T) {
 						},
 					},
 				}
-				metrics, err := metric.NewTracker(":memory:" + "successful_openai_request")
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
 				return &Client{
 					clients: []http.Request{*req},
@@ -462,6 +487,9 @@ func TestTryNextModel(t *testing.T) {
 								"openai/gpt-4": {
 									{"role": "system", "content": "Hello"},
 								},
+							},
+							RedisConfig: &redis.Config{
+								Addr: mr.Addr(),
 							},
 						},
 						metricsTracker: metrics,
@@ -487,11 +515,17 @@ func TestTryNextModel(t *testing.T) {
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				req, _ := http.NewRequest("POST", "https://api.openai.com", nil)
 				transport := &mockTransport{}
-				metrics, err := metric.NewTracker(":memory:" + "provider_not_found")
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
 
 				return &Client{
@@ -505,6 +539,9 @@ func TestTryNextModel(t *testing.T) {
 								"unknown/gpt-4": {
 									{"role": "user", "content": "Hello"},
 								},
+							},
+							RedisConfig: &redis.Config{
+								Addr: mr.Addr(),
 							},
 						},
 						metricsTracker: metrics,
@@ -520,14 +557,20 @@ func TestTryNextModel(t *testing.T) {
 				{"role": "user", "content": "Hello"},
 			},
 			setupClient: func() (*Client, *mockTransport) {
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				req, _ := http.NewRequest("POST", "https://api.openai.com", nil)
 				req.Header.Set("api-key", "test-key")
 				transport := &mockTransport{
 					errors: []error{fmt.Errorf("network error")},
 				}
-				metrics, err := metric.NewTracker(":memory:" + "http_client_error")
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
 				return &Client{
 					clients: []http.Request{*req},
@@ -540,6 +583,9 @@ func TestTryNextModel(t *testing.T) {
 								"openai/gpt-4": {
 									{"role": "system", "content": "Hello"},
 								},
+							},
+							RedisConfig: &redis.Config{
+								Addr: mr.Addr(),
 							},
 						},
 						metricsTracker: metrics,
@@ -878,6 +924,12 @@ func TestDo(t *testing.T) {
 		{
 			name: "successful first attempt with ordered models",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				transport := &mockTransport{
 					responses: []*http.Response{
 						{
@@ -886,10 +938,12 @@ func TestDo(t *testing.T) {
 						},
 					},
 				}
-				metrics, err := metric.NewTracker(":memory:" + "successful first attempt with ordered models")
+
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
+
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
 					config: model.Config{
@@ -898,9 +952,12 @@ func TestDo(t *testing.T) {
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,               // Max 10
-								RecoveryTime:        5 * time.Minute, // Max 1h
+								NoOfCalls:           5,
+								RecoveryTime:        5 * time.Minute,
 							},
+						},
+						RedisConfig: &redis.Config{
+							Addr: mr.Addr(),
 						},
 					},
 					metricsTracker: metrics,
@@ -973,10 +1030,12 @@ func TestDoWithLatencies(t *testing.T) {
 		{
 			name: "successful first attempt with ordered models",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
-				// In this scenario, the transport delay is 0.5 seconds.
-				// Since the number of calls required is 5 (window size),
-				// and only one record is recorded (insufficient to compute moving average),
-				// the model is assumed healthy.
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				transport := &mockTransport{
 					responses: []*http.Response{
 						{
@@ -984,32 +1043,31 @@ func TestDoWithLatencies(t *testing.T) {
 							Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
 						},
 					},
-					// 0.5-second delay (recorded latency ~0.5 seconds)
 					delay: 500 * time.Millisecond,
 				}
-				metrics, err := metric.NewTracker(":memory:" + "successful_first_attempt")
+
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
+
 				client := &NotDiamondHttpClient{
-					Client: &http.Client{Transport: transport},
+					Client:         &http.Client{Transport: transport},
+					metricsTracker: metrics,
 					config: model.Config{
-						// Using a window size of 5, so with one record (insufficient) the model is healthy.
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,                      // window size
-								RecoveryTime:        100 * time.Millisecond, // recovery period
+								NoOfCalls:           5,
+								RecoveryTime:        100 * time.Millisecond,
 							},
 							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,                      // window size
-								RecoveryTime:        100 * time.Millisecond, // recovery period
+								NoOfCalls:           5,
+								RecoveryTime:        100 * time.Millisecond,
 							},
 						},
-					},
-					metricsTracker: metrics,
-				}
+					}}
 				return client, transport
 			},
 			expectedCalls: 1,
@@ -1018,38 +1076,38 @@ func TestDoWithLatencies(t *testing.T) {
 		{
 			name: "latency delay without recovery (model unhealthy)",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
-				// In this case, we set the window size to 1 so that the single measured latency (~0.6 seconds)
-				// immediately becomes the moving average. Because 0.6 > threshold (0.35)
-				// and the record's timestamp is current (i.e. within the RecoveryTime),
-				// the model should be considered unhealthy and tryWithRetries will return an error
-				// without making an HTTP call.
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				transport := &mockTransport{
-					// No response will be used because the unhealthy check fails before sending.
 					delay: 600 * time.Millisecond,
 				}
-				metrics, err := metric.NewTracker(":memory:" + "latency_delay_without_recovery")
+
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
+
 				client := &NotDiamondHttpClient{
-					Client: &http.Client{Transport: transport},
+					Client:         &http.Client{Transport: transport},
+					metricsTracker: metrics,
 					config: model.Config{
-						// Set window size to 1 so that the measured latency is used immediately.
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 0.35,
-								NoOfCalls:           1,                      // immediate decision
-								RecoveryTime:        100 * time.Millisecond, // recovery period
+								NoOfCalls:           1,
+								RecoveryTime:        100 * time.Millisecond,
 							},
 							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 0.35,
-								NoOfCalls:           1,                      // immediate decision
-								RecoveryTime:        100 * time.Millisecond, // recovery period
+								NoOfCalls:           1,
+								RecoveryTime:        100 * time.Millisecond,
 							},
 						},
-					},
-					metricsTracker: metrics,
-				}
+					}}
 				return client, transport
 			},
 			expectedCalls: 0,
@@ -1059,6 +1117,12 @@ func TestDoWithLatencies(t *testing.T) {
 		{
 			name: "latency delay with recovery (model healthy)",
 			setupClient: func() (*NotDiamondHttpClient, *mockTransport) {
+				// Set up miniredis
+				mr, err := miniredis.Run()
+				if err != nil {
+					t.Fatalf("Failed to create miniredis: %v", err)
+				}
+
 				transport := &mockTransport{
 					responses: []*http.Response{
 						{
@@ -1068,28 +1132,29 @@ func TestDoWithLatencies(t *testing.T) {
 					},
 					delay: 500 * time.Millisecond,
 				}
-				metrics, err := metric.NewTracker(":memory:" + "latency_delay_with_recovery")
+
+				metrics, err := metric.NewTracker(mr.Addr())
 				if err != nil {
-					log.Fatalf("Failed to open database connection: %v", err)
+					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
+
 				client := &NotDiamondHttpClient{
-					Client: &http.Client{Transport: transport},
+					Client:         &http.Client{Transport: transport},
+					metricsTracker: metrics,
 					config: model.Config{
 						ModelLatency: model.ModelLatency{
 							"openai/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,                      // window size
-								RecoveryTime:        100 * time.Millisecond, // recovery period
+								NoOfCalls:           5,
+								RecoveryTime:        100 * time.Millisecond,
 							},
 							"azure/gpt-4": &model.RollingAverageLatency{
 								AvgLatencyThreshold: 3.5,
-								NoOfCalls:           5,                      // window size
-								RecoveryTime:        100 * time.Millisecond, // recovery period
+								NoOfCalls:           5,
+								RecoveryTime:        100 * time.Millisecond,
 							},
 						},
-					},
-					metricsTracker: metrics,
-				}
+					}}
 				return client, transport
 			},
 			expectedCalls: 1,

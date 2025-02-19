@@ -24,6 +24,8 @@ go get github.com/Not-Diamond/go-notdiamond
 
 Error handling intentionally ommited in the example for simplicity.
 
+Redis needs to be running and accessible from the machine where this code is executed. (runs on default port 6379, but can be changed)
+
 ```go
 // Get keys
 openaiApiKey := ''
@@ -204,6 +206,19 @@ config := notdiamond.Config{
 	ModelLimits: model.ModelLimits{
 		MaxNoOfCalls:    10000,
 		MaxRecoveryTime: time.Hour * 24,
+	},
+}
+```
+
+### Customise Redis
+
+```go
+config := notdiamond.Config{
+	// ... other config ...
+	Redis: notdiamond.RedisConfig{
+		Addr: "localhost:6379",
+		Password: "password",
+		DB: 0,
 	},
 }
 ```

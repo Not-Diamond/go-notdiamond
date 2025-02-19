@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Not-Diamond/go-notdiamond/pkg/database"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
+	"github.com/alicebob/miniredis/v2"
 )
 
 type testMockTransport struct {
@@ -39,12 +39,13 @@ func (m *testMockTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	m.callCount++
 
-	// For invalid JSON test case
-	if strings.Contains(string(bodyBytes), "invalid_json") && len(m.errors) > 0 {
+	// Try to parse the body as JSON
+	var jsonBody interface{}
+	if err := json.Unmarshal(bodyBytes, &jsonBody); err != nil && len(m.errors) > 0 {
 		return nil, m.errors[0]
 	}
 
-	// Return mock response for valid cases
+	// Return mock response if configured
 	if len(m.responses) > 0 && m.responses[0] != nil {
 		resp := m.responses[0]
 		// Ensure response has a body
@@ -156,8 +157,6 @@ func TestNewTransport(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use a temporary directory for database files
-			database.DataFolder = t.TempDir()
-
 			transport, err := NewTransport(tt.config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewTransport() error = %v, wantErr %v", err, tt.wantErr)
@@ -235,6 +234,13 @@ func TestBuildModelProviders(t *testing.T) {
 }
 
 func TestTransport_RoundTrip(t *testing.T) {
+	// Set up miniredis
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
 	tests := []struct {
 		name          string
 		requestBody   string
@@ -249,24 +255,22 @@ func TestTransport_RoundTrip(t *testing.T) {
 		{
 			name: "basic request without model messages",
 			requestBody: `{
-				"model": "openai/gpt-4",
+				"model": "gpt-4",
+				"messages": [{"role": "user", "content": "Hello"}]
+			}`,
+			expectedBody: `{
+				"model": "gpt-4",
 				"messages": [{"role": "user", "content": "Hello"}]
 			}`,
 			mockResponse: &http.Response{
 				StatusCode: 200,
 				Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
 			},
-			checkRequest: func(t *testing.T, req *http.Request) {
-				body, _ := io.ReadAll(req.Body)
-				if !strings.Contains(string(body), `"content":"Hello"`) {
-					t.Errorf("Expected original message to be preserved, got %s", string(body))
-				}
-			},
 		},
 		{
 			name: "request with model messages",
 			requestBody: `{
-				"model": "openai/gpt-4",
+				"model": "gpt-4",
 				"messages": [{"role": "user", "content": "Hello"}]
 			}`,
 			modelMessages: map[string][]model.Message{
@@ -274,83 +278,75 @@ func TestTransport_RoundTrip(t *testing.T) {
 					{"role": "system", "content": "You are a helpful assistant"},
 				},
 			},
-			checkRequest: func(t *testing.T, req *http.Request) {
-				body, _ := io.ReadAll(req.Body)
-				if !strings.Contains(string(body), `"content":"You are a helpful assistant"`) {
-					t.Errorf("Expected system message to be included, got %s", string(body))
-				}
-				if !strings.Contains(string(body), `"content":"Hello"`) {
-					t.Errorf("Expected user message to be preserved, got %s", string(body))
-				}
-			},
+			expectedBody: `{
+				"model": "gpt-4",
+				"messages": [
+					{"role": "system", "content": "You are a helpful assistant"},
+					{"role": "user", "content": "Hello"}
+				]
+			}`,
 			mockResponse: &http.Response{
 				StatusCode: 200,
 				Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
 			},
 		},
 		{
-			name: "invalid request body",
-			requestBody: `{
-				"model": "gpt-4",
-				"messages": invalid_json
-			}`,
+			name:        "invalid request body",
+			requestBody: `{invalid`,
 			mockResponse: &http.Response{
 				StatusCode: 400,
-				Body:       io.NopCloser(bytes.NewBufferString(`{"error": "invalid character 'i' looking for beginning of value"}`)),
+				Body:       io.NopCloser(bytes.NewBufferString(`{"error": "invalid request"}`)),
 			},
-			mockError:     fmt.Errorf("invalid character 'i' looking for beginning of value"),
+			mockError:     fmt.Errorf("invalid request"),
 			expectError:   true,
-			errorContains: "invalid character",
+			errorContains: "invalid request",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Use a temporary directory for database files
-			database.DataFolder = t.TempDir()
-
-			// Create mock transport
 			mockTransport := &testMockTransport{
 				responses: []*http.Response{tt.mockResponse},
 				errors:    []error{tt.mockError},
 			}
 
-			// Create metrics tracker with unique name for each test
-			metrics, err := metric.NewTracker(":memory:" + tt.name)
+			// Create metrics tracker with miniredis
+			metrics, err := metric.NewTracker(mr.Addr())
 			if err != nil {
 				t.Fatalf("Failed to create metrics tracker: %v", err)
 			}
-			defer metrics.Close()
 
-			// Create transport with mock client
 			transport := &Transport{
 				Base:           mockTransport,
 				metricsTracker: metrics,
 				config: model.Config{
 					ModelMessages: tt.modelMessages,
-					Models: model.WeightedModels{
-						"openai/gpt-4": 1.0,
+					Models:        model.OrderedModels{"openai/gpt-4"},
+					Clients: []http.Request{
+						{
+							Method: "POST",
+							URL: &url.URL{
+								Scheme: "https",
+								Host:   "api.openai.com",
+								Path:   "/v1/chat/completions",
+							},
+						},
 					},
 				},
 				client: &Client{
 					HttpClient: &NotDiamondHttpClient{
 						Client: &http.Client{Transport: mockTransport},
 						config: model.Config{
-							Models: model.WeightedModels{
-								"openai/gpt-4": 1.0,
-							},
+							Models:        model.OrderedModels{"openai/gpt-4"},
 							ModelMessages: tt.modelMessages,
 						},
 						metricsTracker: metrics,
 					},
-					models: model.WeightedModels{
-						"openai/gpt-4": 1.0,
-					},
-					isOrdered: false,
+					models:    model.OrderedModels{"openai/gpt-4"},
+					isOrdered: true,
 					clients: []http.Request{
 						{
 							Method: "POST",
-							Host:   "api.openai.com",
 							URL: &url.URL{
 								Scheme: "https",
 								Host:   "api.openai.com",
@@ -361,22 +357,17 @@ func TestTransport_RoundTrip(t *testing.T) {
 				},
 			}
 
-			// Create request with POST method
-			req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
-				bytes.NewBufferString(tt.requestBody))
+			req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(tt.requestBody))
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
-			req.Header.Set("Content-Type", "application/json")
 
-			// Add context with client for RoundTrip
+			// Add client to context
 			ctx := context.WithValue(req.Context(), clientKey, transport.client)
 			req = req.WithContext(ctx)
 
-			// Execute RoundTrip
 			resp, err := transport.RoundTrip(req)
 
-			// Check error expectations
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got none")
@@ -387,16 +378,38 @@ func TestTransport_RoundTrip(t *testing.T) {
 			}
 
 			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
+				t.Errorf("Unexpected error: %v", err)
+				return
 			}
 
 			if resp == nil {
-				t.Fatal("Expected response but got nil")
+				t.Error("Expected response but got nil")
+				return
 			}
 
-			// Check request modifications if specified
-			if tt.checkRequest != nil && mockTransport.lastRequest != nil {
+			if tt.checkRequest != nil {
 				tt.checkRequest(t, mockTransport.lastRequest)
+			}
+
+			if mockTransport.lastRequest != nil && tt.expectedBody != "" {
+				// Read and compare request bodies
+				actualBody, err := io.ReadAll(mockTransport.lastRequest.Body)
+				if err != nil {
+					t.Fatalf("Failed to read actual request body: %v", err)
+				}
+
+				// Normalize JSON for comparison
+				var actualJSON, expectedJSON interface{}
+				if err := json.Unmarshal(actualBody, &actualJSON); err != nil {
+					t.Fatalf("Failed to parse actual JSON: %v", err)
+				}
+				if err := json.Unmarshal([]byte(tt.expectedBody), &expectedJSON); err != nil {
+					t.Fatalf("Failed to parse expected JSON: %v", err)
+				}
+
+				if !reflect.DeepEqual(actualJSON, expectedJSON) {
+					t.Errorf("Request body mismatch.\nGot: %s\nWant: %s", actualBody, tt.expectedBody)
+				}
 			}
 		})
 	}
