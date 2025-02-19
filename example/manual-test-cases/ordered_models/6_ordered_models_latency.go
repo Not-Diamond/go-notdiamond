@@ -6,7 +6,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
 
-var OrderedModelsWithLatencyAndErrors = model.Config{
+var OrderedModelsWithLatency = model.Config{
 	Models: model.OrderedModels{
 		"openai/gpt-4o-mini",
 		"azure/gpt-4o-mini",
@@ -17,70 +17,21 @@ var OrderedModelsWithLatencyAndErrors = model.Config{
 		"azure/gpt-4o-mini":  3,
 		"azure/gpt-4o":       3,
 	},
-	// ModelLatency: model.ModelLatency{
-	// 	"openai/gpt-4o-mini": &model.RollingAverageLatency{
-	// 		AvgLatencyThreshold: 0.5,
-	// 		NoOfCalls:           5,
-	// 		RecoveryTime:        1 * time.Minute,
-	// 	},
-	// 	"azure/gpt-4o-mini": &model.RollingAverageLatency{
-	// 		AvgLatencyThreshold: 6,
-	// 		NoOfCalls:           10,
-	// 		RecoveryTime:        1 * time.Minute,
-	// 	},
-	// 	"azure/gpt-4o": &model.RollingAverageLatency{
-	// 		AvgLatencyThreshold: 3.2,
-	// 		NoOfCalls:           10,
-	// 		RecoveryTime:        3 * time.Second,
-	// 	},
-	// },
-	ModelErrorTracking: model.ModelErrorTracking{
-		"openai/gpt-4o-mini": &model.RollingErrorTracking{
-			StatusConfigs: map[int]*model.StatusCodeConfig{
-				401: {
-					ErrorThresholdPercentage: 80,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-			},
+	ModelLatency: model.ModelLatency{
+		"openai/gpt-4o-mini": &model.RollingAverageLatency{
+			AvgLatencyThreshold: 0.5,
+			NoOfCalls:           5,
+			RecoveryTime:        1 * time.Minute,
 		},
-		"azure/gpt-4o-mini": &model.RollingErrorTracking{
-			StatusConfigs: map[int]*model.StatusCodeConfig{
-				401: {
-					ErrorThresholdPercentage: 80,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-				500: {
-					ErrorThresholdPercentage: 70,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-				502: {
-					ErrorThresholdPercentage: 60,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-			},
+		"azure/gpt-4o-mini": &model.RollingAverageLatency{
+			AvgLatencyThreshold: 6,
+			NoOfCalls:           10,
+			RecoveryTime:        1 * time.Minute,
 		},
-		"azure/gpt-4o": &model.RollingErrorTracking{
-			StatusConfigs: map[int]*model.StatusCodeConfig{
-				401: {
-					ErrorThresholdPercentage: 80,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-				500: {
-					ErrorThresholdPercentage: 70,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-				502: {
-					ErrorThresholdPercentage: 60,
-					NoOfCalls:                5,
-					RecoveryTime:             1 * time.Minute,
-				},
-			},
+		"azure/gpt-4o": &model.RollingAverageLatency{
+			AvgLatencyThreshold: 3.2,
+			NoOfCalls:           10,
+			RecoveryTime:        3 * time.Second,
 		},
 	},
 	ModelLimits: model.ModelLimits{
