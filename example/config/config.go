@@ -53,5 +53,5 @@ func LoadConfig() Config {
 
 // GetModelConfig returns a model configuration for testing
 func GetModelConfig() model.Config {
-	return test_ordered.OrderedModelsWithLatency
+	return test_ordered.OrderedModelsWithLatencyAndErrors
 }

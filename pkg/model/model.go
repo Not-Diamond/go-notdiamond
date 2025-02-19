@@ -53,16 +53,32 @@ type ModelLimits struct {
 	MaxRecoveryTime time.Duration
 }
 
+// StatusCodeConfig represents the configuration for a specific status code
+type StatusCodeConfig struct {
+	ErrorThresholdPercentage float64       // Percentage of this error code that triggers fallback
+	NoOfCalls                int           // Number of calls to consider for the error percentage
+	RecoveryTime             time.Duration // Time to wait before retrying the model
+}
+
+// RollingErrorTracking is a type that can be used to represent error code tracking configuration.
+type RollingErrorTracking struct {
+	StatusConfigs map[int]*StatusCodeConfig // Configuration for each status code to track
+}
+
+// ModelErrorTracking is a type that can be used to represent model error tracking configuration.
+type ModelErrorTracking map[string]*RollingErrorTracking
+
 // Config is the configuration for the NotDiamond client.
 type Config struct {
-	Clients         []http.Request
-	Models          Models
-	MaxRetries      map[string]int
-	Timeout         map[string]float64
-	ModelMessages   map[string][]Message
-	Backoff         map[string]float64
-	StatusCodeRetry interface{}
-	ModelLatency    ModelLatency
-	ModelLimits     ModelLimits
-	RedisConfig     *redis.Config // Redis configuration for metrics tracking
+	Clients            []http.Request
+	Models             Models
+	MaxRetries         map[string]int
+	Timeout            map[string]float64
+	ModelMessages      map[string][]Message
+	Backoff            map[string]float64
+	StatusCodeRetry    interface{}
+	ModelLatency       ModelLatency
+	ModelErrorTracking ModelErrorTracking // Configuration for error code tracking
+	ModelLimits        ModelLimits
+	RedisConfig        *redis.Config // Redis configuration for metrics tracking
 }
