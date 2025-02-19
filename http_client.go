@@ -122,6 +122,21 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 	var lastErr error
 	var lastStatusCode int
 
+	// Check model health (both latency and error rate) before starting attempts
+	slog.Info("🏥 Checking initial model health", "model", modelFull)
+	healthy, healthErr := c.metricsTracker.CheckModelOverallHealth(modelFull, c.config)
+	if healthErr != nil {
+		lastErr = healthErr
+		slog.Error("❌ Initial health check failed", "model", modelFull, "error", healthErr.Error())
+		return nil, fmt.Errorf("model health check failed: %w", healthErr)
+	}
+	if !healthy {
+		lastErr = fmt.Errorf("model %s is unhealthy", modelFull)
+		slog.Info("⚠️ Model is already unhealthy, skipping", "model", modelFull)
+		return nil, lastErr
+	}
+	slog.Info("✅ Initial health check passed", "model", modelFull)
+
 	for attempt := 0; ; attempt++ {
 		maxRetries := c.getMaxRetriesForStatus(modelFull, lastStatusCode)
 		if attempt >= maxRetries {
@@ -137,21 +152,6 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 		ctx, cancel := context.WithTimeout(originalCtx, time.Duration(timeout*float64(time.Second)))
 		defer cancel()
-
-		// Check model health
-		healthy, healthErr := c.metricsTracker.CheckModelHealth(modelFull, c.config)
-		if healthErr != nil {
-			cancel()
-			lastErr = healthErr
-			slog.Error("Model health check failed", "model", modelFull, "error", healthErr.Error())
-			return nil, fmt.Errorf("model health check failed: %w", healthErr)
-		}
-		if !healthy {
-			cancel()
-			lastErr = fmt.Errorf("model %s is unhealthy", modelFull)
-			slog.Info("🔄 Fallback to next model", "reason", "unhealthy", "model", modelFull)
-			return nil, lastErr
-		}
 
 		startTime := time.Now()
 		var resp *http.Response
@@ -197,6 +197,25 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			}
 
 			lastStatusCode = resp.StatusCode
+			// Record status code for error tracking
+			slog.Info("📊 Recording error code", "model", modelFull, "status_code", resp.StatusCode)
+			if err := c.metricsTracker.RecordErrorCode(modelFull, resp.StatusCode); err != nil {
+				slog.Error("Failed to record error code", "error", err)
+			}
+
+			// Check model health after recording the error code
+			slog.Info("🏥 Checking model health after error", "model", modelFull, "status_code", resp.StatusCode)
+			healthy, healthErr := c.metricsTracker.CheckModelOverallHealth(modelFull, c.config)
+			if healthErr != nil {
+				slog.Error("❌ Health check failed after error", "model", modelFull, "error", healthErr.Error())
+				return nil, fmt.Errorf("model %s health check failed after error: %w", modelFull, healthErr)
+			}
+			if !healthy {
+				slog.Info("⚠️ Model became unhealthy after error", "model", modelFull, "status_code", resp.StatusCode)
+				return nil, fmt.Errorf("model %s became unhealthy after error", modelFull)
+			}
+			slog.Info("✅ Health check passed after error", "model", modelFull)
+
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				// Record the latency in Redis
 				recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "success")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -194,4 +195,200 @@ func (c *Client) GetLatencyEntries(ctx context.Context, model string, n int64) (
 	}
 
 	return latencies, nil
+}
+
+// RecordErrorCode records a model's error code with timestamp
+func (c *Client) RecordErrorCode(ctx context.Context, model string, statusCode int) error {
+	// Key format: errors:model
+	key := fmt.Sprintf("errors:%s", model)
+
+	// Create metric entry
+	entry := map[string]interface{}{
+		"timestamp":   time.Now().UTC(),
+		"status_code": statusCode,
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("failed to marshal error entry: %v", err)
+	}
+
+	// Add to sorted set with timestamp as score for easy retrieval/cleanup
+	score := float64(time.Now().UTC().Unix())
+	if err := c.rdb.ZAdd(ctx, key, redis.Z{Score: score, Member: string(data)}).Err(); err != nil {
+		return fmt.Errorf("failed to record error: %v", err)
+	}
+
+	// Also increment the counter for this model
+	counterKey := fmt.Sprintf("errors:%s:counter", model)
+	if err := c.rdb.Incr(ctx, counterKey).Err(); err != nil {
+		return fmt.Errorf("failed to increment counter: %v", err)
+	}
+
+	return nil
+}
+
+// GetErrorPercentages calculates the percentage of error codes in the last N calls
+func (c *Client) GetErrorPercentages(ctx context.Context, model string, n int64) (map[int]float64, error) {
+	// Validate input
+	if n < 0 {
+		return nil, fmt.Errorf("number of calls cannot be negative: %d", n)
+	}
+	if n == 0 {
+		return make(map[int]float64), nil
+	}
+
+	key := fmt.Sprintf("errors:%s", model)
+	recoveryKey := fmt.Sprintf("errors:%s:recovery", model)
+
+	// Check if we have any entries
+	exists, err := c.rdb.Exists(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if key exists: %v", err)
+	}
+	if exists == 0 {
+		return make(map[int]float64), nil
+	}
+
+	// Get the last recovery time if it exists
+	var lastRecoveryTime time.Time
+	recoveryTimeStr, err := c.rdb.Get(ctx, recoveryKey).Result()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("failed to get recovery time: %v", err)
+	}
+	if err == nil {
+		lastRecoveryTime, err = time.Parse(time.RFC3339, recoveryTimeStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse recovery time: %v", err)
+		}
+		// If recovery time is in the past, clean up the key
+		if lastRecoveryTime.Before(time.Now().UTC()) {
+			if err := c.rdb.Del(ctx, recoveryKey).Err(); err != nil {
+				slog.Info("Failed to clean up expired recovery key", "error", err)
+			}
+			lastRecoveryTime = time.Time{} // Reset to zero value
+		}
+	}
+
+	// Get all entries to ensure we have enough valid ones after filtering
+	entries, err := c.rdb.ZRevRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get error entries: %v", err)
+	}
+
+	if len(entries) == 0 {
+		return make(map[int]float64), nil
+	}
+
+	// Count occurrences of each status code
+	statusCodeCounts := make(map[int]int)
+	validEntries := 0
+
+	for _, entry := range entries {
+		var metric map[string]interface{}
+		if err := json.Unmarshal([]byte(entry), &metric); err != nil {
+			return nil, fmt.Errorf("failed to parse error entry: %v", err)
+		}
+
+		// Parse the timestamp
+		timestamp, err := time.Parse(time.RFC3339, metric["timestamp"].(string))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse timestamp: %v", err)
+		}
+
+		// Only consider entries after the last recovery time
+		if !lastRecoveryTime.IsZero() && timestamp.Before(lastRecoveryTime) {
+			continue
+		}
+
+		statusCode := int(metric["status_code"].(float64))
+		statusCodeCounts[statusCode]++
+		validEntries++
+
+		// Stop if we have enough entries
+		if validEntries >= int(n) {
+			break
+		}
+	}
+
+	// Only calculate percentages if we have enough valid entries
+	statusCodePercentages := make(map[int]float64)
+	if validEntries == int(n) {
+		for statusCode, count := range statusCodeCounts {
+			statusCodePercentages[statusCode] = float64(count) / float64(validEntries) * 100
+		}
+	}
+
+	return statusCodePercentages, nil
+}
+
+// CleanupOldErrors removes error entries older than the specified duration
+func (c *Client) CleanupOldErrors(ctx context.Context, model string, age time.Duration) error {
+	key := fmt.Sprintf("errors:%s", model)
+	counterKey := fmt.Sprintf("errors:%s:counter", model)
+	min := "-inf"
+	max := fmt.Sprintf("%d", time.Now().Add(-age).Unix())
+
+	// Remove old entries
+	if err := c.rdb.ZRemRangeByScore(ctx, key, min, max).Err(); err != nil {
+		return fmt.Errorf("failed to remove old errors: %v", err)
+	}
+
+	// Check if any entries remain
+	count, err := c.rdb.ZCard(ctx, key).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check remaining entries: %v", err)
+	}
+
+	// If no entries remain, reset the counter
+	if count == 0 {
+		if err := c.rdb.Del(ctx, counterKey).Err(); err != nil {
+			return fmt.Errorf("failed to reset counter: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// SetErrorRecoveryTime sets a recovery time for a model with automatic expiration
+func (c *Client) SetErrorRecoveryTime(ctx context.Context, model string, duration time.Duration) error {
+	key := fmt.Sprintf("errors:%s:recovery", model)
+	errorsKey := fmt.Sprintf("errors:%s", model)
+	counterKey := fmt.Sprintf("errors:%s:counter", model)
+
+	// Clean up existing data
+	if err := c.rdb.Del(ctx, errorsKey, counterKey).Err(); err != nil {
+		return fmt.Errorf("failed to clean error data: %v", err)
+	}
+
+	// Store recovery time with expiration
+	recoveryEnd := time.Now().UTC().Add(duration)
+	return c.rdb.Set(ctx, key, recoveryEnd.Format(time.RFC3339), duration).Err()
+}
+
+// CheckErrorRecoveryTime checks if a model is still in error recovery period
+func (c *Client) CheckErrorRecoveryTime(ctx context.Context, model string) (bool, error) {
+	key := fmt.Sprintf("errors:%s:recovery", model)
+
+	// Check if recovery key exists
+	exists, err := c.rdb.Exists(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to check error recovery time: %v", err)
+	}
+
+	return exists == 1, nil
+}
+
+// ClearAllModelData deletes all data associated with a model
+func (c *Client) ClearAllModelData(ctx context.Context, model string) error {
+	// Delete all keys associated with the model
+	keys := []string{
+		fmt.Sprintf("latency:%s:recovery", model),
+		fmt.Sprintf("errors:%s:recovery", model),
+		fmt.Sprintf("latency:%s", model),
+		fmt.Sprintf("latency:%s:counter", model),
+		fmt.Sprintf("errors:%s", model),
+		fmt.Sprintf("errors:%s:counter", model),
+	}
+	return c.rdb.Del(ctx, keys...).Err()
 }

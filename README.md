@@ -170,7 +170,7 @@ config := notdiamond.Config{
 
 Global retry behavior:
 
-````go
+```go
 config := notdiamond.Config{
 	// ... other config ...
 	StatusCodeRetry: map[string]int{
@@ -194,7 +194,7 @@ config := notdiamond.Config{
 		},
 	},
 }
-````
+```
 
 ## Model Limits
 
@@ -222,3 +222,53 @@ config := notdiamond.Config{
 	},
 }
 ```
+
+## Error Rate Fallback
+
+Configure custom error rate thresholds and recovery time for each model, with different thresholds for different status codes:
+
+```go
+config := model.Config{
+	// ... other config ...
+	ModelErrorTracking: model.ModelErrorTracking{
+		"openai/gpt-4": &model.RollingErrorTracking{
+			StatusConfigs: map[int]*model.StatusCodeConfig{
+				401: {
+					ErrorThresholdPercentage: 80,  // Fallback if 80% of calls return 401
+					NoOfCalls:                5,   // Number of calls to consider
+					RecoveryTime:             1 * time.Minute, // Time to wait before retrying
+				},
+				500: {
+					ErrorThresholdPercentage: 70,  // Fallback if 70% of calls return 500
+					NoOfCalls:                5,
+					RecoveryTime:             1 * time.Minute,
+				},
+				502: {
+					ErrorThresholdPercentage: 60,  // Fallback if 60% of calls return 502
+					NoOfCalls:                5,
+					RecoveryTime:             1 * time.Minute,
+				},
+				429: {
+					ErrorThresholdPercentage: 40,  // Fallback if 40% of calls return 429 (rate limit)
+					NoOfCalls:                5,
+					RecoveryTime:             30 * time.Second,
+				},
+			},
+		},
+	},
+}
+```
+
+The error tracking system will:
+
+1. Track all HTTP status codes for each model
+2. Calculate the error percentage for each status code over the last N calls
+3. If any status code's error percentage exceeds its threshold, mark the model as unhealthy and fallback to other models
+4. After the recovery time, the model will be tried again
+
+This allows for fine-grained control over error handling:
+
+- Set different thresholds for different types of errors (e.g., more aggressive fallback for rate limits)
+- Configure different number of calls and recovery times per status code
+- Track any HTTP status code you want to monitor
+- Configure different thresholds for different models based on their reliability
