@@ -63,3 +63,6 @@ debug.test
 *.db-shm
 *.db-wal
 *.db-journal
+
+# Vertex AI
+gemini.json

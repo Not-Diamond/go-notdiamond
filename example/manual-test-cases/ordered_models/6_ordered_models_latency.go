@@ -12,6 +12,11 @@ var OrderedModelsWithLatency = model.Config{
 		"azure/gpt-4o-mini",
 		"azure/gpt-4o",
 	},
+	MaxRetries: map[string]int{
+		"openai/gpt-4o-mini": 1,
+		"azure/gpt-4o-mini":  3,
+		"azure/gpt-4o":       3,
+	},
 	ModelLatency: model.ModelLatency{
 		"openai/gpt-4o-mini": &model.RollingAverageLatency{
 			AvgLatencyThreshold: 0.5,

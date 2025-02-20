@@ -128,3 +128,176 @@ func TestRollingAverageLatency_Usage(t *testing.T) {
 		t.Error("Expected RecoveryTime to be 1 minute")
 	}
 }
+
+func TestStatusCodeConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *StatusCodeConfig
+		expected struct {
+			threshold    float64
+			calls        int
+			recoveryTime time.Duration
+		}
+	}{
+		{
+			name: "basic config",
+			config: &StatusCodeConfig{
+				ErrorThresholdPercentage: 80,
+				NoOfCalls:                5,
+				RecoveryTime:             1 * time.Minute,
+			},
+			expected: struct {
+				threshold    float64
+				calls        int
+				recoveryTime time.Duration
+			}{
+				threshold:    80,
+				calls:        5,
+				recoveryTime: 1 * time.Minute,
+			},
+		},
+		{
+			name:   "zero values",
+			config: &StatusCodeConfig{},
+			expected: struct {
+				threshold    float64
+				calls        int
+				recoveryTime time.Duration
+			}{
+				threshold:    0,
+				calls:        0,
+				recoveryTime: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.config.ErrorThresholdPercentage != tt.expected.threshold {
+				t.Errorf("ErrorThresholdPercentage = %v, want %v", tt.config.ErrorThresholdPercentage, tt.expected.threshold)
+			}
+			if tt.config.NoOfCalls != tt.expected.calls {
+				t.Errorf("NoOfCalls = %v, want %v", tt.config.NoOfCalls, tt.expected.calls)
+			}
+			if tt.config.RecoveryTime != tt.expected.recoveryTime {
+				t.Errorf("RecoveryTime = %v, want %v", tt.config.RecoveryTime, tt.expected.recoveryTime)
+			}
+		})
+	}
+}
+
+func TestRollingErrorTracking(t *testing.T) {
+	tests := []struct {
+		name     string
+		tracking *RollingErrorTracking
+		wantLen  int
+	}{
+		{
+			name: "empty config",
+			tracking: &RollingErrorTracking{
+				StatusConfigs: make(map[int]*StatusCodeConfig),
+			},
+			wantLen: 0,
+		},
+		{
+			name: "single status code",
+			tracking: &RollingErrorTracking{
+				StatusConfigs: map[int]*StatusCodeConfig{
+					401: {
+						ErrorThresholdPercentage: 80,
+						NoOfCalls:                5,
+						RecoveryTime:             1 * time.Minute,
+					},
+				},
+			},
+			wantLen: 1,
+		},
+		{
+			name: "multiple status codes",
+			tracking: &RollingErrorTracking{
+				StatusConfigs: map[int]*StatusCodeConfig{
+					401: {
+						ErrorThresholdPercentage: 80,
+						NoOfCalls:                5,
+						RecoveryTime:             1 * time.Minute,
+					},
+					500: {
+						ErrorThresholdPercentage: 70,
+						NoOfCalls:                5,
+						RecoveryTime:             1 * time.Minute,
+					},
+				},
+			},
+			wantLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.tracking.StatusConfigs) != tt.wantLen {
+				t.Errorf("StatusConfigs length = %v, want %v", len(tt.tracking.StatusConfigs), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestModelErrorTracking(t *testing.T) {
+	tests := []struct {
+		name     string
+		tracking ModelErrorTracking
+		wantLen  int
+	}{
+		{
+			name:     "empty tracking",
+			tracking: make(ModelErrorTracking),
+			wantLen:  0,
+		},
+		{
+			name: "single model",
+			tracking: ModelErrorTracking{
+				"openai/gpt-4": &RollingErrorTracking{
+					StatusConfigs: map[int]*StatusCodeConfig{
+						401: {
+							ErrorThresholdPercentage: 80,
+							NoOfCalls:                5,
+							RecoveryTime:             1 * time.Minute,
+						},
+					},
+				},
+			},
+			wantLen: 1,
+		},
+		{
+			name: "multiple models",
+			tracking: ModelErrorTracking{
+				"openai/gpt-4": &RollingErrorTracking{
+					StatusConfigs: map[int]*StatusCodeConfig{
+						401: {
+							ErrorThresholdPercentage: 80,
+							NoOfCalls:                5,
+							RecoveryTime:             1 * time.Minute,
+						},
+					},
+				},
+				"azure/gpt-4": &RollingErrorTracking{
+					StatusConfigs: map[int]*StatusCodeConfig{
+						500: {
+							ErrorThresholdPercentage: 70,
+							NoOfCalls:                5,
+							RecoveryTime:             1 * time.Minute,
+						},
+					},
+				},
+			},
+			wantLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.tracking) != tt.wantLen {
+				t.Errorf("ModelErrorTracking length = %v, want %v", len(tt.tracking), tt.wantLen)
+			}
+		})
+	}
+}
