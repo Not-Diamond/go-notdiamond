@@ -31,6 +31,7 @@ type clientType string
 const (
 	ClientTypeAzure  clientType = "azure"
 	ClientTypeOpenai clientType = "openai"
+	ClientTypeVertex clientType = "vertex"
 )
 
 // RollingAverageLatency is a type that can be used to represent a rolling average latency.
@@ -81,4 +82,6 @@ type Config struct {
 	ModelErrorTracking ModelErrorTracking // Configuration for error code tracking
 	ModelLimits        ModelLimits
 	RedisConfig        *redis.Config // Redis configuration for metrics tracking
+	VertexProjectID    string
+	VertexLocation     string
 }

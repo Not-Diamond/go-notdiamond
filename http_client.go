@@ -17,6 +17,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 	"github.com/Not-Diamond/go-notdiamond/pkg/validation"
+	"golang.org/x/oauth2/google"
 )
 
 // NotDiamondHttpClient is a type that can be used to represent a NotDiamond HTTP client.
@@ -159,10 +160,18 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 		if attempt == 0 && modelFull == request.ExtractProviderFromRequest(req)+"/"+request.ExtractModelFromRequest(req) {
 			currentReq := req.Clone(ctx)
-			resp, reqErr = c.Client.Do(currentReq)
+			// Read and preserve the original request body
+			body, err := io.ReadAll(currentReq.Body)
+			if err != nil {
+				return nil, err
+			}
+			currentReq.Body = io.NopCloser(bytes.NewBuffer(body))
+			// Use a raw client for the initial request
+			rawClient := &http.Client{}
+			resp, reqErr = rawClient.Do(currentReq)
 		} else {
 			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
-				resp, reqErr = tryNextModel(client, modelFull, messages, ctx)
+				resp, reqErr = tryNextModel(client, modelFull, messages, ctx, req)
 			}
 		}
 
@@ -359,46 +368,111 @@ func combineMessages(modelMessages []model.Message, userMessages []model.Message
 }
 
 // tryNextModel tries the next model.
-func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context) (*http.Response, error) {
+func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context, originalReq *http.Request) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
 	nextProvider, nextModel := parts[0], parts[1]
 
 	var nextReq *http.Request
 
 	for _, clientReq := range client.clients {
-		if strings.Contains(clientReq.URL.String(), nextProvider) {
-			nextReq = clientReq.Clone(ctx)
-			slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
-			break
+		url := clientReq.URL.String()
+		switch nextProvider {
+		case "vertex":
+			if strings.Contains(url, "aiplatform.googleapis.com") {
+				nextReq = clientReq.Clone(ctx)
+				slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+				goto found
+			}
+		case "azure":
+			if strings.Contains(url, "azure") {
+				nextReq = clientReq.Clone(ctx)
+				slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+				goto found
+			}
+		case "openai":
+			if strings.Contains(url, "openai.com") {
+				nextReq = clientReq.Clone(ctx)
+				slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+				goto found
+			}
 		}
 	}
+found:
 
 	if nextReq == nil {
 		slog.Info("! No more fallbacks available for", "model:", modelFull)
 		return nil, fmt.Errorf("no client found for provider %s", nextProvider)
 	}
 
-	if nextProvider == "azure" {
-		nextReq.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", nextModel)
-		nextReq.URL.RawQuery = "api-version=2023-05-15"
-	}
-
-	modelMessages := client.HttpClient.config.ModelMessages[modelFull]
-	combinedMessages, err := combineMessages(modelMessages, messages)
+	// Read and preserve the original request body
+	originalBody, err := io.ReadAll(originalReq.Body)
 	if err != nil {
 		return nil, err
 	}
+	originalReq.Body = io.NopCloser(bytes.NewBuffer(originalBody))
 
-	payload := map[string]interface{}{
-		"model":    nextModel,
-		"messages": combinedMessages,
+	var jsonData []byte
+	switch nextProvider {
+	case "azure", "openai":
+		// Transform Vertex AI format to OpenAI/Azure format
+		var vertexPayload map[string]interface{}
+		if err := json.Unmarshal(originalBody, &vertexPayload); err != nil {
+			return nil, err
+		}
+
+		messages := make([]map[string]interface{}, 0)
+		if contents, ok := vertexPayload["contents"].([]interface{}); ok {
+			for _, content := range contents {
+				if contentMap, ok := content.(map[string]interface{}); ok {
+					if parts, ok := contentMap["parts"].([]interface{}); ok && len(parts) > 0 {
+						if part, ok := parts[0].(map[string]interface{}); ok {
+							messages = append(messages, map[string]interface{}{
+								"role":    contentMap["role"],
+								"content": part["text"],
+							})
+						}
+					}
+				}
+			}
+		}
+
+		payload := map[string]interface{}{
+			"messages": messages,
+		}
+
+		if nextProvider == "openai" {
+			payload["model"] = nextModel
+		}
+
+		// Copy generation config if it exists
+		if genConfig, ok := vertexPayload["generationConfig"].(map[string]interface{}); ok {
+			if temp, ok := genConfig["temperature"].(float64); ok {
+				payload["temperature"] = temp
+			}
+			if maxTokens, ok := genConfig["maxOutputTokens"].(float64); ok {
+				payload["max_tokens"] = maxTokens
+			}
+			if topP, ok := genConfig["topP"].(float64); ok {
+				payload["top_p"] = topP
+			}
+		}
+
+		if nextProvider == "azure" {
+			nextReq.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", nextModel)
+			nextReq.URL.RawQuery = "api-version=2023-05-15"
+		}
+
+		jsonData, err = json.Marshal(payload)
+	case "vertex":
+		projectID := client.HttpClient.config.VertexProjectID
+		location := client.HttpClient.config.VertexLocation
+		nextReq.URL.Path = fmt.Sprintf("/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
+			projectID, location, nextModel)
+
+		// For Vertex, just use the original request body
+		jsonData = originalBody
 	}
 
-	if nextProvider == "azure" {
-		delete(payload, "model")
-	}
-
-	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -420,12 +494,24 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 		apiKey = nextReq.Header.Get("api-key")
 	}
 
-	if nextProvider == "openai" {
+	switch nextProvider {
+	case "openai":
 		nextReq.Header.Set("Authorization", "Bearer "+apiKey)
 		nextReq.Header.Del("api-key")
-	} else if nextProvider == "azure" {
+	case "azure":
 		nextReq.Header.Set("api-key", apiKey)
 		nextReq.Header.Del("Authorization")
+	case "vertex":
+		// For Vertex AI, we'll use the default credentials from the environment
+		credentials, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+		if err != nil {
+			return nil, fmt.Errorf("error getting credentials: %w", err)
+		}
+		token, err := credentials.TokenSource.Token()
+		if err != nil {
+			return nil, fmt.Errorf("error getting token: %w", err)
+		}
+		nextReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	}
 
 	return client.HttpClient.Client.Do(nextReq)
