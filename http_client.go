@@ -53,10 +53,26 @@ func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error)
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	slog.Info("🔍 Executing request", "url", req.URL.String())
 
-	messages := request.ExtractMessagesFromRequest(req)
-	extractedModel := request.ExtractModelFromRequest(req)
-	extractedProvider := request.ExtractProviderFromRequest(req)
+	// Read and log the initial request body
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new reader for each operation that needs the body
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	messages := request.ExtractMessagesFromRequest(req.Clone(req.Context()))
+
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	extractedModel := request.ExtractModelFromRequest(req.Clone(req.Context()))
+
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	extractedProvider := request.ExtractProviderFromRequest(req.Clone(req.Context()))
+
 	currentModel := extractedProvider + "/" + extractedModel
+
+	// Restore the original body for future operations
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var lastErr error
 	originalCtx := req.Context()
@@ -64,8 +80,27 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 		var modelsToTry []string
 
+		// Read and preserve the original request body
+		originalBody, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read original request body: %v", err)
+		}
+		// Restore the body for future reads
+		req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
+
 		if client.isOrdered {
 			modelsToTry = client.models.(model.OrderedModels)
+			// Validate that requested model is in the configured list
+			modelExists := false
+			for _, m := range modelsToTry {
+				if m == currentModel {
+					modelExists = true
+					break
+				}
+			}
+			if !modelExists {
+				return nil, fmt.Errorf("requested model %s is not in the configured model list", currentModel)
+			}
 		} else {
 			modelsToTry = getWeightedModelsList(client.models.(model.WeightedModels))
 		}
@@ -81,6 +116,9 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		for _, modelFull := range modelsToTry {
+			// Reset the request body for each attempt
+			req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
+
 			if resp, err := c.tryWithRetries(modelFull, req, messages, originalCtx); err == nil {
 				return resp, nil
 			} else {
@@ -206,8 +244,6 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			}
 
 			lastStatusCode = resp.StatusCode
-			// Record status code for error tracking
-			slog.Info("📊 Recording error code", "model", modelFull, "status_code", resp.StatusCode)
 			if err := c.metricsTracker.RecordErrorCode(modelFull, resp.StatusCode); err != nil {
 				slog.Error("Failed to record error code", "error", err)
 			}
@@ -367,6 +403,106 @@ func combineMessages(modelMessages []model.Message, userMessages []model.Message
 	return combinedMessages, nil
 }
 
+// transformRequestForProvider transforms the request for a specific provider
+func transformRequestForProvider(originalBody []byte, nextProvider, nextModel string, client *Client) ([]byte, error) {
+	var jsonData []byte
+	var err error
+
+	switch nextProvider {
+	case "azure", "openai":
+		jsonData, err = transformToOpenAIFormat(originalBody, nextProvider, nextModel)
+	case "vertex":
+		jsonData, err = transformToVertexFormat(originalBody, nextModel, client)
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", nextProvider)
+	}
+
+	return jsonData, err
+}
+
+// transformToOpenAIFormat transforms the request body to OpenAI/Azure format
+func transformToOpenAIFormat(originalBody []byte, provider, modelName string) ([]byte, error) {
+	var payload map[string]interface{}
+
+	// If coming from Vertex, transform to OpenAI format first
+	if bytes.Contains(originalBody, []byte("aiplatform.googleapis.com")) {
+		transformed, err := request.TransformFromVertexToOpenAI(originalBody)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(transformed, &payload); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := json.Unmarshal(originalBody, &payload); err != nil {
+			return nil, err
+		}
+	}
+
+	// Update model name based on provider
+	if provider == "openai" {
+		payload["model"] = modelName
+	} else if provider == "azure" {
+		delete(payload, "model")
+	}
+
+	return json.Marshal(payload)
+}
+
+// transformToVertexFormat transforms the request body to Vertex format
+func transformToVertexFormat(originalBody []byte, modelName string, client *Client) ([]byte, error) {
+	return request.TransformToVertexRequest(originalBody, modelName)
+}
+
+// updateRequestURL updates the request URL based on the provider and model
+func updateRequestURL(req *http.Request, provider, modelName string, client *Client) error {
+	switch provider {
+	case "azure":
+		req.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", modelName)
+		req.URL.RawQuery = "api-version=2023-05-15"
+	case "vertex":
+		projectID := client.HttpClient.config.VertexProjectID
+		location := client.HttpClient.config.VertexLocation
+		req.URL.Host = fmt.Sprintf("%s-aiplatform.googleapis.com", location)
+		req.URL.Scheme = "https"
+		req.URL.Path = fmt.Sprintf("/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
+			projectID, location, modelName)
+	}
+	return nil
+}
+
+// updateRequestAuth updates the request authentication based on the provider
+func updateRequestAuth(req *http.Request, provider string, ctx context.Context) error {
+	// Extract API key from either header format
+	var apiKey string
+	authHeader := req.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		apiKey = req.Header.Get("api-key")
+	}
+
+	switch provider {
+	case "openai":
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Del("api-key")
+	case "azure":
+		req.Header.Set("api-key", apiKey)
+		req.Header.Del("Authorization")
+	case "vertex":
+		credentials, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+		if err != nil {
+			return fmt.Errorf("error getting credentials: %w", err)
+		}
+		token, err := credentials.TokenSource.Token()
+		if err != nil {
+			return fmt.Errorf("error getting token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	}
+	return nil
+}
+
 // tryNextModel tries the next model.
 func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context, originalReq *http.Request) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
@@ -374,6 +510,7 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 
 	var nextReq *http.Request
 
+	// Find matching client request
 	for _, clientReq := range client.clients {
 		url := clientReq.URL.String()
 		switch nextProvider {
@@ -400,7 +537,7 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 found:
 
 	if nextReq == nil {
-		slog.Info("! No more fallbacks available for", "model:", modelFull)
+		slog.Info("❌ No matching client found", "provider", nextProvider)
 		return nil, fmt.Errorf("no client found for provider %s", nextProvider)
 	}
 
@@ -411,70 +548,10 @@ found:
 	}
 	originalReq.Body = io.NopCloser(bytes.NewBuffer(originalBody))
 
-	var jsonData []byte
-	switch nextProvider {
-	case "azure", "openai":
-		// Transform Vertex AI format to OpenAI/Azure format
-		var vertexPayload map[string]interface{}
-		if err := json.Unmarshal(originalBody, &vertexPayload); err != nil {
-			return nil, err
-		}
-
-		messages := make([]map[string]interface{}, 0)
-		if contents, ok := vertexPayload["contents"].([]interface{}); ok {
-			for _, content := range contents {
-				if contentMap, ok := content.(map[string]interface{}); ok {
-					if parts, ok := contentMap["parts"].([]interface{}); ok && len(parts) > 0 {
-						if part, ok := parts[0].(map[string]interface{}); ok {
-							messages = append(messages, map[string]interface{}{
-								"role":    contentMap["role"],
-								"content": part["text"],
-							})
-						}
-					}
-				}
-			}
-		}
-
-		payload := map[string]interface{}{
-			"messages": messages,
-		}
-
-		if nextProvider == "openai" {
-			payload["model"] = nextModel
-		}
-
-		// Copy generation config if it exists
-		if genConfig, ok := vertexPayload["generationConfig"].(map[string]interface{}); ok {
-			if temp, ok := genConfig["temperature"].(float64); ok {
-				payload["temperature"] = temp
-			}
-			if maxTokens, ok := genConfig["maxOutputTokens"].(float64); ok {
-				payload["max_tokens"] = maxTokens
-			}
-			if topP, ok := genConfig["topP"].(float64); ok {
-				payload["top_p"] = topP
-			}
-		}
-
-		if nextProvider == "azure" {
-			nextReq.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", nextModel)
-			nextReq.URL.RawQuery = "api-version=2023-05-15"
-		}
-
-		jsonData, err = json.Marshal(payload)
-	case "vertex":
-		projectID := client.HttpClient.config.VertexProjectID
-		location := client.HttpClient.config.VertexLocation
-		nextReq.URL.Path = fmt.Sprintf("/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
-			projectID, location, nextModel)
-
-		// For Vertex, just use the original request body
-		jsonData = originalBody
-	}
-
+	// Transform request body for the target provider
+	jsonData, err := transformRequestForProvider(originalBody, nextProvider, nextModel, client)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to transform request: %w", err)
 	}
 
 	nextReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
@@ -485,33 +562,14 @@ found:
 	}
 	nextReq.Header.Set("Content-Type", "application/json")
 
-	// Extract API key from either header format
-	var apiKey string
-	authHeader := nextReq.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
-	} else {
-		apiKey = nextReq.Header.Get("api-key")
+	// Update request URL
+	if err := updateRequestURL(nextReq, nextProvider, nextModel, client); err != nil {
+		return nil, fmt.Errorf("failed to update URL: %w", err)
 	}
 
-	switch nextProvider {
-	case "openai":
-		nextReq.Header.Set("Authorization", "Bearer "+apiKey)
-		nextReq.Header.Del("api-key")
-	case "azure":
-		nextReq.Header.Set("api-key", apiKey)
-		nextReq.Header.Del("Authorization")
-	case "vertex":
-		// For Vertex AI, we'll use the default credentials from the environment
-		credentials, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
-		if err != nil {
-			return nil, fmt.Errorf("error getting credentials: %w", err)
-		}
-		token, err := credentials.TokenSource.Token()
-		if err != nil {
-			return nil, fmt.Errorf("error getting token: %w", err)
-		}
-		nextReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	// Update authentication
+	if err := updateRequestAuth(nextReq, nextProvider, ctx); err != nil {
+		return nil, fmt.Errorf("failed to update authentication: %w", err)
 	}
 
 	return client.HttpClient.Client.Do(nextReq)

@@ -308,6 +308,12 @@ func TestErrorTrackingWithMultipleStatusCodes(t *testing.T) {
 			t.Errorf("RecordErrorCode() error = %v", err)
 		}
 	}
+	// Add some successful calls to keep error percentage below threshold
+	for i := 0; i < 3; i++ {
+		if err := tracker.RecordErrorCode(modelName, 200); err != nil {
+			t.Errorf("RecordErrorCode() error = %v", err)
+		}
+	}
 
 	// Check health - should still be healthy
 	healthy, err := tracker.CheckModelErrorHealth(modelName, config)
@@ -332,6 +338,11 @@ func TestErrorTrackingWithMultipleStatusCodes(t *testing.T) {
 	}
 	if healthy {
 		t.Error("Expected model to be unhealthy after 3 500 errors")
+	}
+
+	// Record recovery time for 500 errors
+	if err := tracker.RecordErrorRecoveryTime(modelName, config, 500); err != nil {
+		t.Errorf("RecordErrorRecoveryTime() error = %v", err)
 	}
 
 	// Fast forward time by 1 minute

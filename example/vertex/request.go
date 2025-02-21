@@ -9,6 +9,9 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+// For testing purposes, we make this function variable
+var findDefaultCredentials = google.FindDefaultCredentials
+
 // NewRequest creates a new request for the Vertex AI API.
 func NewRequest(projectID string, location string) (*http.Request, error) {
 	if projectID == "" {
@@ -32,7 +35,7 @@ func NewRequest(projectID string, location string) (*http.Request, error) {
 
 	// Get credentials from the environment
 	ctx := context.Background()
-	credentials, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	credentials, err := findDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return nil, fmt.Errorf("error getting credentials: %w", err)
 	}

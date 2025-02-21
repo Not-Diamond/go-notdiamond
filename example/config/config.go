@@ -63,5 +63,9 @@ func LoadConfig() Config {
 
 // GetModelConfig returns a model configuration for testing
 func GetModelConfig() model.Config {
-	return test_ordered.OrderedModels
+	cfg := LoadConfig()
+	modelConfig := test_ordered.OrderedModels
+	modelConfig.VertexProjectID = cfg.VertexProjectID
+	modelConfig.VertexLocation = cfg.VertexLocation
+	return modelConfig
 }
