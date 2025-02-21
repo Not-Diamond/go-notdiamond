@@ -336,3 +336,311 @@ func TestRecordLatencyRedisErrors(t *testing.T) {
 		t.Errorf("Expected successful operation, got error: %v", err)
 	}
 }
+
+func TestErrorTracking(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient(Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	modelName := "test-model"
+
+	// Test recording error codes
+	for i := 0; i < 5; i++ {
+		if err := client.RecordErrorCode(ctx, modelName, 401); err != nil {
+			t.Errorf("RecordErrorCode() error = %v", err)
+		}
+	}
+
+	// Test getting error percentages
+	percentages, err := client.GetErrorPercentages(ctx, modelName, 5)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if percentage, exists := percentages[401]; !exists || percentage != 100 {
+		t.Errorf("Expected 100%% 401 errors, got %.2f%%", percentage)
+	}
+
+	// Test setting error recovery time
+	recoveryTime := 1 * time.Minute
+	if err := client.SetErrorRecoveryTime(ctx, modelName, recoveryTime); err != nil {
+		t.Errorf("SetErrorRecoveryTime() error = %v", err)
+	}
+
+	// Test checking error recovery time
+	inRecovery, err := client.CheckErrorRecoveryTime(ctx, modelName)
+	if err != nil {
+		t.Errorf("CheckErrorRecoveryTime() error = %v", err)
+	}
+	if !inRecovery {
+		t.Error("Expected model to be in recovery")
+	}
+
+	// Test error percentages after recovery time is set
+	percentages, err = client.GetErrorPercentages(ctx, modelName, 5)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if len(percentages) != 0 {
+		t.Error("Expected no error percentages during recovery period")
+	}
+
+	// Fast forward past recovery time
+	mr.FastForward(2 * time.Minute)
+
+	// Test checking error recovery time after expiration
+	inRecovery, err = client.CheckErrorRecoveryTime(ctx, modelName)
+	if err != nil {
+		t.Errorf("CheckErrorRecoveryTime() error = %v", err)
+	}
+	if inRecovery {
+		t.Error("Expected model to be out of recovery")
+	}
+}
+
+func TestErrorTrackingWithMixedStatusCodes(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient(Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	modelName := "test-model"
+
+	// Record mixed status codes
+	statusCodes := []int{401, 401, 401, 500, 500}
+	for _, code := range statusCodes {
+		if err := client.RecordErrorCode(ctx, modelName, code); err != nil {
+			t.Errorf("RecordErrorCode() error = %v", err)
+		}
+	}
+
+	// Test getting error percentages
+	percentages, err := client.GetErrorPercentages(ctx, modelName, 5)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+
+	expected401Percentage := 60.0 // 3 out of 5
+	expected500Percentage := 40.0 // 2 out of 5
+
+	if percentage, exists := percentages[401]; !exists || percentage != expected401Percentage {
+		t.Errorf("Expected %.2f%% 401 errors, got %.2f%%", expected401Percentage, percentage)
+	}
+	if percentage, exists := percentages[500]; !exists || percentage != expected500Percentage {
+		t.Errorf("Expected %.2f%% 500 errors, got %.2f%%", expected500Percentage, percentage)
+	}
+}
+
+func TestErrorTrackingCleanup(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient(Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	modelName := "test-model"
+
+	// Record errors with old timestamps
+	oldTime := time.Now().Add(-25 * time.Hour)
+	key := fmt.Sprintf("errors:%s", modelName)
+	counterKey := fmt.Sprintf("errors:%s:counter", modelName)
+
+	for i := 0; i < 5; i++ {
+		entry := map[string]interface{}{
+			"timestamp":   oldTime.Format(time.RFC3339),
+			"status_code": 401,
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatalf("Failed to marshal entry: %v", err)
+		}
+
+		score := float64(oldTime.Unix())
+		if err := client.rdb.ZAdd(ctx, key, redis.Z{Score: score, Member: string(data)}).Err(); err != nil {
+			t.Fatalf("Failed to add old entry: %v", err)
+		}
+		oldTime = oldTime.Add(time.Minute)
+	}
+
+	// Set the counter
+	if err := client.rdb.Set(ctx, counterKey, "5", 0).Err(); err != nil {
+		t.Fatalf("Failed to set counter: %v", err)
+	}
+
+	// Verify errors are present before cleanup
+	percentages, err := client.GetErrorPercentages(ctx, modelName, 5)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if len(percentages) == 0 {
+		t.Error("Expected error percentages before cleanup")
+	}
+
+	// Clean up old errors
+	if err := client.CleanupOldErrors(ctx, modelName, 24*time.Hour); err != nil {
+		t.Errorf("CleanupOldErrors() error = %v", err)
+	}
+
+	// Verify errors were cleaned up
+	percentages, err = client.GetErrorPercentages(ctx, modelName, 5)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if len(percentages) != 0 {
+		t.Error("Expected no error percentages after cleanup")
+	}
+
+	// Verify counter was reset
+	count, err := client.rdb.Get(ctx, counterKey).Int64()
+	if err != nil && err != redis.Nil {
+		t.Errorf("Failed to get counter: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected counter to be reset to 0, got %d", count)
+	}
+}
+
+func TestErrorTrackingEdgeCases(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient(Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	modelName := "test-model"
+
+	// Test getting error percentages for non-existent model
+	percentages, err := client.GetErrorPercentages(ctx, modelName, 5)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if len(percentages) != 0 {
+		t.Error("Expected empty percentages for non-existent model")
+	}
+
+	// Test checking recovery time for non-existent model
+	inRecovery, err := client.CheckErrorRecoveryTime(ctx, modelName)
+	if err != nil {
+		t.Errorf("CheckErrorRecoveryTime() error = %v", err)
+	}
+	if inRecovery {
+		t.Error("Expected non-existent model to not be in recovery")
+	}
+
+	// Test setting invalid recovery time
+	if err := client.SetErrorRecoveryTime(ctx, modelName, -1*time.Minute); err != nil {
+		t.Errorf("SetErrorRecoveryTime() with negative duration error = %v", err)
+	}
+
+	// Test getting error percentages with invalid count
+	_, err = client.GetErrorPercentages(ctx, modelName, -1)
+	if err == nil {
+		t.Error("Expected error when getting percentages with negative count")
+	}
+
+	// Test getting error percentages with zero count
+	percentages, err = client.GetErrorPercentages(ctx, modelName, 0)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if len(percentages) != 0 {
+		t.Error("Expected empty percentages for zero count")
+	}
+}
+
+func TestErrorTrackingRecoveryTimeExpiration(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient(Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	modelName := "test-model"
+
+	// Set recovery time
+	recoveryTime := 1 * time.Minute
+	if err := client.SetErrorRecoveryTime(ctx, modelName, recoveryTime); err != nil {
+		t.Errorf("SetErrorRecoveryTime() error = %v", err)
+	}
+
+	// Record some errors
+	for i := 0; i < 5; i++ {
+		if err := client.RecordErrorCode(ctx, modelName, 401); err != nil {
+			t.Errorf("RecordErrorCode() error = %v", err)
+		}
+	}
+
+	// Fast forward just before expiration
+	mr.FastForward(59 * time.Second)
+
+	// Should still be in recovery
+	inRecovery, err := client.CheckErrorRecoveryTime(ctx, modelName)
+	if err != nil {
+		t.Errorf("CheckErrorRecoveryTime() error = %v", err)
+	}
+	if !inRecovery {
+		t.Error("Expected model to still be in recovery")
+	}
+
+	// Fast forward past expiration
+	mr.FastForward(2 * time.Second)
+
+	// Should be out of recovery
+	inRecovery, err = client.CheckErrorRecoveryTime(ctx, modelName)
+	if err != nil {
+		t.Errorf("CheckErrorRecoveryTime() error = %v", err)
+	}
+	if inRecovery {
+		t.Error("Expected model to be out of recovery")
+	}
+
+	// New errors should be counted
+	if err := client.RecordErrorCode(ctx, modelName, 401); err != nil {
+		t.Errorf("RecordErrorCode() error = %v", err)
+	}
+
+	percentages, err := client.GetErrorPercentages(ctx, modelName, 1)
+	if err != nil {
+		t.Errorf("GetErrorPercentages() error = %v", err)
+	}
+	if percentage, exists := percentages[401]; !exists || percentage != 100 {
+		t.Errorf("Expected 100%% 401 errors after recovery, got %.2f%%", percentage)
+	}
+}
