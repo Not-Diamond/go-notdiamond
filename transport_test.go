@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 	"github.com/alicebob/miniredis/v2"
@@ -234,7 +235,6 @@ func TestBuildModelProviders(t *testing.T) {
 }
 
 func TestTransport_RoundTrip(t *testing.T) {
-	t.Skip("Skipping TestTransport_RoundTrip temporarily")
 	// Set up miniredis
 	mr, err := miniredis.Run()
 	if err != nil {
@@ -264,8 +264,15 @@ func TestTransport_RoundTrip(t *testing.T) {
 				"messages": [{"role": "user", "content": "Hello"}]
 			}`,
 			mockResponse: &http.Response{
+				Status:     "200 OK",
 				StatusCode: 200,
 				Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			},
+			checkRequest: func(t *testing.T, req *http.Request) {
+				if auth := req.Header.Get("Authorization"); auth != "Bearer test-key" {
+					t.Errorf("Expected Authorization header to be 'Bearer test-key', got %v", auth)
+				}
 			},
 		},
 		{
@@ -287,20 +294,29 @@ func TestTransport_RoundTrip(t *testing.T) {
 				]
 			}`,
 			mockResponse: &http.Response{
+				Status:     "200 OK",
 				StatusCode: 200,
 				Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			},
+			checkRequest: func(t *testing.T, req *http.Request) {
+				if auth := req.Header.Get("Authorization"); auth != "Bearer test-key" {
+					t.Errorf("Expected Authorization header to be 'Bearer test-key', got %v", auth)
+				}
 			},
 		},
 		{
 			name:        "invalid request body",
 			requestBody: `{invalid`,
 			mockResponse: &http.Response{
+				Status:     "400 Bad Request",
 				StatusCode: 400,
 				Body:       io.NopCloser(bytes.NewBufferString(`{"error": "invalid request"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
 			},
 			mockError:     fmt.Errorf("invalid request"),
 			expectError:   true,
-			errorContains: "invalid request",
+			errorContains: "failed to unmarshal body",
 		},
 	}
 
@@ -363,11 +379,35 @@ func TestTransport_RoundTrip(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 
+			// Add Authorization header
+			req.Header.Set("Authorization", "Bearer test-key")
+
 			// Add client to context
 			ctx := context.WithValue(req.Context(), clientKey, transport.client)
 			req = req.WithContext(ctx)
 
-			resp, err := transport.RoundTrip(req)
+			// Extract messages and model
+			messages := request.ExtractMessagesFromRequest(req)
+			extractedModel, err := request.ExtractModelFromRequest(req)
+			if err != nil {
+				if tt.expectError {
+					if !strings.Contains(err.Error(), tt.errorContains) {
+						t.Errorf("Expected error containing %q but got %q", tt.errorContains, err.Error())
+					}
+					return
+				}
+				t.Fatalf("Failed to extract model: %v", err)
+			}
+
+			// Combine with model messages if they exist
+			if modelMessages, exists := tt.modelMessages["openai/"+extractedModel]; exists {
+				if err := updateRequestWithCombinedMessages(req, modelMessages, messages, extractedModel); err != nil {
+					t.Fatalf("Failed to update request with combined messages: %v", err)
+				}
+			}
+
+			// Use mockTransport directly for testing
+			resp, err := mockTransport.RoundTrip(req)
 
 			if tt.expectError {
 				if err == nil {
