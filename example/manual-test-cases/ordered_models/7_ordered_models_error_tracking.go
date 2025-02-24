@@ -9,6 +9,7 @@ import (
 var OrderedModelsWithErrorTracking = model.Config{
 	Models: model.OrderedModels{
 		"openai/gpt-4o-mini",
+		"vertex/gemini-pro",
 		"azure/gpt-4o-mini",
 		"azure/gpt-4o",
 	},

@@ -17,6 +17,7 @@ import (
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 	"github.com/Not-Diamond/go-notdiamond/pkg/validation"
+	"golang.org/x/oauth2/google"
 )
 
 // NotDiamondHttpClient is a type that can be used to represent a NotDiamond HTTP client.
@@ -52,10 +53,29 @@ func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error)
 func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	slog.Info("🔍 Executing request", "url", req.URL.String())
 
-	messages := request.ExtractMessagesFromRequest(req)
-	extractedModel := request.ExtractModelFromRequest(req)
-	extractedProvider := request.ExtractProviderFromRequest(req)
+	// Read and log the initial request body
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new reader for each operation that needs the body
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	messages := request.ExtractMessagesFromRequest(req.Clone(req.Context()))
+
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	extractedModel, err := request.ExtractModelFromRequest(req.Clone(req.Context()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract model: %w", err)
+	}
+
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	extractedProvider := request.ExtractProviderFromRequest(req.Clone(req.Context()))
+
 	currentModel := extractedProvider + "/" + extractedModel
+
+	// Restore the original body for future operations
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var lastErr error
 	originalCtx := req.Context()
@@ -63,8 +83,27 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 		var modelsToTry []string
 
+		// Read and preserve the original request body
+		originalBody, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read original request body: %v", err)
+		}
+		// Restore the body for future reads
+		req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
+
 		if client.isOrdered {
 			modelsToTry = client.models.(model.OrderedModels)
+			// Validate that requested model is in the configured list
+			modelExists := false
+			for _, m := range modelsToTry {
+				if m == currentModel {
+					modelExists = true
+					break
+				}
+			}
+			if !modelExists {
+				return nil, fmt.Errorf("requested model %s is not in the configured model list", currentModel)
+			}
 		} else {
 			modelsToTry = getWeightedModelsList(client.models.(model.WeightedModels))
 		}
@@ -80,6 +119,9 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		for _, modelFull := range modelsToTry {
+			// Reset the request body for each attempt
+			req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
+
 			if resp, err := c.tryWithRetries(modelFull, req, messages, originalCtx); err == nil {
 				return resp, nil
 			} else {
@@ -157,12 +199,27 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		var resp *http.Response
 		var reqErr error
 
-		if attempt == 0 && modelFull == request.ExtractProviderFromRequest(req)+"/"+request.ExtractModelFromRequest(req) {
-			currentReq := req.Clone(ctx)
-			resp, reqErr = c.Client.Do(currentReq)
+		if attempt == 0 {
+			extractedModel, err := request.ExtractModelFromRequest(req)
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract model: %w", err)
+			}
+			extractedProvider := request.ExtractProviderFromRequest(req)
+			if modelFull == extractedProvider+"/"+extractedModel {
+				currentReq := req.Clone(ctx)
+				// Read and preserve the original request body
+				body, err := io.ReadAll(currentReq.Body)
+				if err != nil {
+					return nil, err
+				}
+				currentReq.Body = io.NopCloser(bytes.NewBuffer(body))
+				// Use a raw client for the initial request
+				rawClient := &http.Client{}
+				resp, reqErr = rawClient.Do(currentReq)
+			}
 		} else {
 			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
-				resp, reqErr = tryNextModel(client, modelFull, messages, ctx)
+				resp, reqErr = tryNextModel(client, modelFull, messages, ctx, req)
 			}
 		}
 
@@ -197,8 +254,6 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			}
 
 			lastStatusCode = resp.StatusCode
-			// Record status code for error tracking
-			slog.Info("📊 Recording error code", "model", modelFull, "status_code", resp.StatusCode)
 			if err := c.metricsTracker.RecordErrorCode(modelFull, resp.StatusCode); err != nil {
 				slog.Error("Failed to record error code", "error", err)
 			}
@@ -358,49 +413,159 @@ func combineMessages(modelMessages []model.Message, userMessages []model.Message
 	return combinedMessages, nil
 }
 
+func transformRequestForProvider(originalBody []byte, nextProvider, nextModel string, client *Client) ([]byte, error) {
+	var jsonData []byte
+	var err error
+
+	switch nextProvider {
+	case "azure", "openai":
+		jsonData, err = transformToOpenAIFormat(originalBody, nextProvider, nextModel)
+	case "vertex":
+		jsonData, err = transformToVertexFormat(originalBody, nextModel, client)
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", nextProvider)
+	}
+
+	return jsonData, err
+}
+
+// transformToOpenAIFormat transforms the request body to OpenAI/Azure format
+func transformToOpenAIFormat(originalBody []byte, provider, modelName string) ([]byte, error) {
+	var payload map[string]interface{}
+
+	// If coming from Vertex, transform to OpenAI format first
+	if bytes.Contains(originalBody, []byte("aiplatform.googleapis.com")) {
+		transformed, err := request.TransformFromVertexToOpenAI(originalBody)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(transformed, &payload); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := json.Unmarshal(originalBody, &payload); err != nil {
+			return nil, err
+		}
+	}
+
+	// Update model name based on provider
+	if provider == "openai" {
+		payload["model"] = modelName
+	} else if provider == "azure" {
+		delete(payload, "model")
+	}
+
+	return json.Marshal(payload)
+}
+
+// transformToVertexFormat transforms the request body to Vertex format
+func transformToVertexFormat(originalBody []byte, modelName string, client *Client) ([]byte, error) {
+	return request.TransformToVertexRequest(originalBody, modelName)
+}
+
+// updateRequestURL updates the request URL based on the provider and model
+func updateRequestURL(req *http.Request, provider, modelName string, client *Client) error {
+	switch provider {
+	case "azure":
+		req.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", modelName)
+		// Use API version from config or fall back to default
+		apiVersion := client.HttpClient.config.AzureAPIVersion
+		if apiVersion == "" {
+			apiVersion = "2023-05-15"
+		}
+		req.URL.RawQuery = fmt.Sprintf("api-version=%s", apiVersion)
+	case "vertex":
+		projectID := client.HttpClient.config.VertexProjectID
+		location := client.HttpClient.config.VertexLocation
+		req.URL.Host = fmt.Sprintf("%s-aiplatform.googleapis.com", location)
+		req.URL.Scheme = "https"
+		req.URL.Path = fmt.Sprintf("/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
+			projectID, location, modelName)
+	}
+	return nil
+}
+
+// updateRequestAuth updates the request authentication based on the provider
+func updateRequestAuth(req *http.Request, provider string, ctx context.Context) error {
+	// Extract API key from either header format
+	var apiKey string
+	authHeader := req.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		apiKey = req.Header.Get("api-key")
+	}
+
+	switch provider {
+	case "openai":
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Del("api-key")
+	case "azure":
+		req.Header.Set("api-key", apiKey)
+		req.Header.Del("Authorization")
+	case "vertex":
+		credentials, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+		if err != nil {
+			return fmt.Errorf("error getting credentials: %w", err)
+		}
+		token, err := credentials.TokenSource.Token()
+		if err != nil {
+			return fmt.Errorf("error getting token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	}
+	return nil
+}
+
 // tryNextModel tries the next model.
-func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context) (*http.Response, error) {
+func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context, originalReq *http.Request) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
 	nextProvider, nextModel := parts[0], parts[1]
 
 	var nextReq *http.Request
 
+	// Find matching client request
 	for _, clientReq := range client.clients {
-		if strings.Contains(clientReq.URL.String(), nextProvider) {
-			nextReq = clientReq.Clone(ctx)
-			slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
-			break
+		url := clientReq.URL.String()
+		switch nextProvider {
+		case "vertex":
+			if strings.Contains(url, "aiplatform.googleapis.com") {
+				nextReq = clientReq.Clone(ctx)
+				slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+				goto found
+			}
+		case "azure":
+			if strings.Contains(url, "azure") {
+				nextReq = clientReq.Clone(ctx)
+				slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+				goto found
+			}
+		case "openai":
+			if strings.Contains(url, "openai.com") {
+				nextReq = clientReq.Clone(ctx)
+				slog.Info("🔄 Fallback to", "model:", modelFull, "| URL:", nextReq.URL.String())
+				goto found
+			}
 		}
 	}
+found:
 
 	if nextReq == nil {
-		slog.Info("! No more fallbacks available for", "model:", modelFull)
+		slog.Info("❌ No matching client found", "provider", nextProvider)
 		return nil, fmt.Errorf("no client found for provider %s", nextProvider)
 	}
 
-	if nextProvider == "azure" {
-		nextReq.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", nextModel)
-		nextReq.URL.RawQuery = "api-version=2023-05-15"
-	}
-
-	modelMessages := client.HttpClient.config.ModelMessages[modelFull]
-	combinedMessages, err := combineMessages(modelMessages, messages)
+	// Read and preserve the original request body
+	originalBody, err := io.ReadAll(originalReq.Body)
 	if err != nil {
 		return nil, err
 	}
+	originalReq.Body = io.NopCloser(bytes.NewBuffer(originalBody))
 
-	payload := map[string]interface{}{
-		"model":    nextModel,
-		"messages": combinedMessages,
-	}
-
-	if nextProvider == "azure" {
-		delete(payload, "model")
-	}
-
-	jsonData, err := json.Marshal(payload)
+	// Transform request body for the target provider
+	jsonData, err := transformRequestForProvider(originalBody, nextProvider, nextModel, client)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to transform request: %w", err)
 	}
 
 	nextReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
@@ -411,21 +576,14 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	}
 	nextReq.Header.Set("Content-Type", "application/json")
 
-	// Extract API key from either header format
-	var apiKey string
-	authHeader := nextReq.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
-	} else {
-		apiKey = nextReq.Header.Get("api-key")
+	// Update request URL
+	if err := updateRequestURL(nextReq, nextProvider, nextModel, client); err != nil {
+		return nil, fmt.Errorf("failed to update URL: %w", err)
 	}
 
-	if nextProvider == "openai" {
-		nextReq.Header.Set("Authorization", "Bearer "+apiKey)
-		nextReq.Header.Del("api-key")
-	} else if nextProvider == "azure" {
-		nextReq.Header.Set("api-key", apiKey)
-		nextReq.Header.Del("Authorization")
+	// Update authentication
+	if err := updateRequestAuth(nextReq, nextProvider, ctx); err != nil {
+		return nil, fmt.Errorf("failed to update authentication: %w", err)
 	}
 
 	return client.HttpClient.Client.Do(nextReq)

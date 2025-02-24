@@ -71,7 +71,10 @@ func NewTransport(config model.Config) (*Transport, error) {
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Extract the original messages and model
 	messages := request.ExtractMessagesFromRequest(req)
-	extractedModel := request.ExtractModelFromRequest(req)
+	extractedModel, err := request.ExtractModelFromRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract model: %w", err)
+	}
 	extractedProvider := request.ExtractProviderFromRequest(req)
 	currentModel := extractedProvider + "/" + extractedModel
 
@@ -140,4 +143,44 @@ func buildModelProviders(models model.Models) map[string]map[string]bool {
 func isOrderedModels(models model.Models) bool {
 	_, ok := models.(model.OrderedModels)
 	return ok
+}
+
+func ExtractModelFromRequest(req *http.Request) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("request is nil")
+	}
+
+	if req.Body == nil {
+		return "", fmt.Errorf("request body is nil")
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read body: %w", err)
+	}
+
+	// Always restore the body for future reads
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	// Handle empty body
+	if len(body) == 0 {
+		return "", fmt.Errorf("empty request body")
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", fmt.Errorf("failed to unmarshal body: %w", err)
+	}
+
+	modelStr, ok := payload["model"].(string)
+	if !ok {
+		return "", fmt.Errorf("model field not found or not a string")
+	}
+
+	// If it's in provider/model format, extract just the model part
+	parts := strings.Split(modelStr, "/")
+	if len(parts) == 2 {
+		return parts[1], nil // Return just the model part
+	}
+	return modelStr, nil
 }

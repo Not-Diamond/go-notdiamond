@@ -6,9 +6,10 @@ import (
 
 var OrderedModels = model.Config{
 	Models: model.OrderedModels{
+		"vertex/gemini-pro",
+		"openai/gpt-4o",
 		"openai/gpt-4o-mini",
 		"azure/gpt-4o-mini",
 		"azure/gpt-4o",
-		"openai/gpt-4o",
 	},
 }

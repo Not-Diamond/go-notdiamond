@@ -240,6 +240,7 @@ func (c *Client) GetErrorPercentages(ctx context.Context, model string, n int64)
 
 	key := fmt.Sprintf("errors:%s", model)
 	recoveryKey := fmt.Sprintf("errors:%s:recovery", model)
+	counterKey := fmt.Sprintf("errors:%s:counter", model)
 
 	// Check if we have any entries
 	exists, err := c.rdb.Exists(ctx, key).Result()
@@ -261,12 +262,13 @@ func (c *Client) GetErrorPercentages(ctx context.Context, model string, n int64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse recovery time: %v", err)
 		}
-		// If recovery time is in the past, clean up the key
+		// If recovery time is in the past, clean up all associated data
 		if lastRecoveryTime.Before(time.Now().UTC()) {
-			if err := c.rdb.Del(ctx, recoveryKey).Err(); err != nil {
-				slog.Info("Failed to clean up expired recovery key", "error", err)
+			// Clean up all error data
+			if err := c.rdb.Del(ctx, recoveryKey, key, counterKey).Err(); err != nil {
+				slog.Info("Failed to clean up expired error data", "error", err)
 			}
-			lastRecoveryTime = time.Time{} // Reset to zero value
+			return make(map[int]float64), nil
 		}
 	}
 
@@ -311,9 +313,9 @@ func (c *Client) GetErrorPercentages(ctx context.Context, model string, n int64)
 		}
 	}
 
-	// Only calculate percentages if we have enough valid entries
+	// Calculate percentages with all valid entries we have
 	statusCodePercentages := make(map[int]float64)
-	if validEntries == int(n) {
+	if validEntries > 0 {
 		for statusCode, count := range statusCodeCounts {
 			statusCodePercentages[statusCode] = float64(count) / float64(validEntries) * 100
 		}

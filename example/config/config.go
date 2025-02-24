@@ -18,6 +18,8 @@ type Config struct {
 	AzureEndpoint    string
 	AzureAPIVersion  string
 	OpenAIAPIVersion string
+	VertexProjectID  string
+	VertexLocation   string
 	RedisConfig      redis.Config
 }
 
@@ -35,12 +37,20 @@ func LoadConfig() Config {
 		redisAddr = "localhost:6379"
 	}
 
+	// Set default Vertex location if not provided
+	vertexLocation := os.Getenv("VERTEX_LOCATION")
+	if vertexLocation == "" {
+		vertexLocation = "us-central1"
+	}
+
 	cfg := Config{
 		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
 		AzureAPIKey:      os.Getenv("AZURE_API_KEY"),
 		AzureEndpoint:    os.Getenv("AZURE_ENDPOINT"),
 		AzureAPIVersion:  os.Getenv("AZURE_API_VERSION"),
 		OpenAIAPIVersion: os.Getenv("OPENAI_API_VERSION"),
+		VertexProjectID:  os.Getenv("VERTEX_PROJECT_ID"),
+		VertexLocation:   vertexLocation,
 		RedisConfig: redis.Config{
 			Addr:     redisAddr,
 			Password: os.Getenv("REDIS_PASSWORD"),
@@ -53,5 +63,10 @@ func LoadConfig() Config {
 
 // GetModelConfig returns a model configuration for testing
 func GetModelConfig() model.Config {
-	return test_ordered.OrderedModelsWithErrorTracking
+	cfg := LoadConfig()
+	modelConfig := test_ordered.OrderedModels
+	modelConfig.VertexProjectID = cfg.VertexProjectID
+	modelConfig.VertexLocation = cfg.VertexLocation
+	modelConfig.AzureAPIVersion = cfg.AzureAPIVersion
+	return modelConfig
 }

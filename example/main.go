@@ -14,6 +14,8 @@ import (
 	"example/azure"
 	"example/config"
 	"example/openai"
+	"example/response"
+	"example/vertex"
 )
 
 func main() {
@@ -29,12 +31,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create azure request: %v", err)
 	}
+	vertexRequest, err := vertex.NewRequest(cfg.VertexProjectID, cfg.VertexLocation)
+	if err != nil {
+		log.Fatalf("Failed to create vertex request: %v", err)
+	}
 
 	// Get model configuration
 	modelConfig := config.GetModelConfig()
 	modelConfig.Clients = []http.Request{
 		*openaiRequest,
 		*azureRequest,
+		*vertexRequest,
 	}
 	modelConfig.RedisConfig = &cfg.RedisConfig
 
@@ -50,27 +57,60 @@ func main() {
 	}
 
 	// Prepare request payload
-	messages := []map[string]string{
-		{"role": "user", "content": "Hello, how are you?"},
-	}
-	payload := map[string]interface{}{
-		"model":    "gpt-4",
-		"messages": messages,
-	}
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		log.Fatalf("Failed to marshal payload: %v", err)
+	useVertex := true // Toggle this to switch between Vertex AI and OpenAI
+
+	var jsonData []byte
+	var req *http.Request
+
+	if useVertex {
+		vertexPayload := map[string]interface{}{
+			"model": "gemini-pro",
+			"contents": []map[string]interface{}{
+				{
+					"role": "user",
+					"parts": []map[string]interface{}{
+						{
+							"text": "Hello, how are you??",
+						},
+					},
+				},
+			},
+			"generationConfig": map[string]interface{}{
+				"temperature":     0.7,
+				"maxOutputTokens": 1024,
+				"topP":            0.95,
+				"topK":            40,
+			},
+		}
+		jsonData, err = json.Marshal(vertexPayload)
+		if err != nil {
+			log.Fatalf("Failed to marshal payload: %v", err)
+		}
+		req, err = vertex.NewRequest(cfg.VertexProjectID, cfg.VertexLocation)
+	} else {
+		openaiPayload := map[string]interface{}{
+			"model": "gpt-4o-mini", // Non-existent model to trigger fallback
+			"messages": []map[string]interface{}{
+				{
+					"role":    "user",
+					"content": "Hello, how are you??",
+				},
+			},
+		}
+		jsonData, err = json.Marshal(openaiPayload)
+		if err != nil {
+			log.Fatalf("Failed to marshal payload: %v", err)
+		}
+		req, err = openai.NewRequest("https://api.openai.com/v1/chat/completions", cfg.OpenAIAPIKey)
 	}
 
-	// Create request
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
 
-	// Make request
+	req.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+
+	// Make request with transport client
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -84,23 +124,12 @@ func main() {
 		log.Fatalf("Failed to read response: %v", err)
 	}
 
-	var response struct {
-		Model   string `json:"model"`
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+	result, err := response.Parse(body, start)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	if err := json.Unmarshal(body, &response); err != nil {
-		fmt.Print(string(body))
-		log.Fatalf("Failed to parse response: %v", err)
-	}
-
-	timeTaken := time.Since(start)
-
-	fmt.Printf("🤖 Model: %s\n", response.Model)
-	fmt.Printf("⏱️  Time: %.2fs\n", timeTaken.Seconds())
-	fmt.Printf("💬 Response: %s\n", response.Choices[0].Message.Content)
+	fmt.Printf("🤖 Model: %s\n", result.Model)
+	fmt.Printf("⏱️  Time: %.2fs\n", result.TimeTaken.Seconds())
+	fmt.Printf("💬 Response: %s\n", result.Response)
 }

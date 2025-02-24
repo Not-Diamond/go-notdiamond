@@ -3,7 +3,11 @@
 One line statement to improve reliability and uptime of LLM requests. [Documentation](https://docs.notdiamond.ai/docs/fallbacks-and-timeouts/)
 
 > **Note**
-> Currently only **OpenAI** and **Azure** models are supported.
+> Currently supported providers:
+>
+> - **OpenAI** models
+> - **Azure** models
+> - **Vertex AI**
 
 ## ✨ Features:
 
@@ -31,19 +35,25 @@ Redis needs to be running and accessible from the machine where this code is exe
 openaiApiKey := ''
 azureApiKey := ''
 azureEndpoint := ''
+vertexProjectID := '' // Your Google Cloud project ID
+vertexLocation := 'us-central1' // Your Google Cloud region
 
 // Create requests
-openaiRequest := NewRequest("https://api.openai.com/v1/chat/completions", openaiApiKey)
-azureRequest := NewRequest(azureEndpoint, azureApiKey)
+openaiRequest := openai.NewRequest("https://api.openai.com/v1/chat/completions", openaiApiKey)
+azureRequest := azure.NewRequest(azureEndpoint, azureApiKey)
+vertexRequest := vertex.NewRequest(vertexProjectID, vertexLocation)
 
 // Create config
 config := model.Config{
-	Clients: []http.Request{ openaiRequest, azureRequest },
-	Models: model.OrderedModels{ "azure/gpt-4o-mini", "openai/gpt-4o-mini" },
+	Clients: []http.Request{ openaiRequest, azureRequest, vertexRequest },
+	Models: model.OrderedModels{ "vertex/gemini-pro", "azure/gpt-4o-mini", "openai/gpt-4o-mini" },
 	MaxRetries: map[string]int{
+		"vertex/gemini-pro": 2,
 		"azure/gpt-4o-mini": 2,
 		"openai/gpt-4o-mini": 2,
 	},
+	VertexProjectID: vertexProjectID,
+	VertexLocation: vertexLocation,
 }
 
 // Create transport
@@ -81,8 +91,9 @@ You can configure load balancing between models using weights:
 config := notdiamond.Config{
 	// ... other config ...
 	Models: notdiamond.WeightedModels{
+		"vertex/gemini-pro": 0.4, // 40% of requests
 		"azure/gpt-4": 0.3, // 30% of requests
-		"openai/gpt-4": 0.7, // 70% of requests
+		"openai/gpt-4": 0.3, // 30% of requests
 	},
 }
 ```
