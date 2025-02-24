@@ -64,7 +64,10 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	messages := request.ExtractMessagesFromRequest(req.Clone(req.Context()))
 
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
-	extractedModel := request.ExtractModelFromRequest(req.Clone(req.Context()))
+	extractedModel, err := request.ExtractModelFromRequest(req.Clone(req.Context()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract model: %w", err)
+	}
 
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 	extractedProvider := request.ExtractProviderFromRequest(req.Clone(req.Context()))
@@ -196,17 +199,24 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		var resp *http.Response
 		var reqErr error
 
-		if attempt == 0 && modelFull == request.ExtractProviderFromRequest(req)+"/"+request.ExtractModelFromRequest(req) {
-			currentReq := req.Clone(ctx)
-			// Read and preserve the original request body
-			body, err := io.ReadAll(currentReq.Body)
+		if attempt == 0 {
+			extractedModel, err := request.ExtractModelFromRequest(req)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to extract model: %w", err)
 			}
-			currentReq.Body = io.NopCloser(bytes.NewBuffer(body))
-			// Use a raw client for the initial request
-			rawClient := &http.Client{}
-			resp, reqErr = rawClient.Do(currentReq)
+			extractedProvider := request.ExtractProviderFromRequest(req)
+			if modelFull == extractedProvider+"/"+extractedModel {
+				currentReq := req.Clone(ctx)
+				// Read and preserve the original request body
+				body, err := io.ReadAll(currentReq.Body)
+				if err != nil {
+					return nil, err
+				}
+				currentReq.Body = io.NopCloser(bytes.NewBuffer(body))
+				// Use a raw client for the initial request
+				rawClient := &http.Client{}
+				resp, reqErr = rawClient.Do(currentReq)
+			}
 		} else {
 			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
 				resp, reqErr = tryNextModel(client, modelFull, messages, ctx, req)
@@ -403,7 +413,6 @@ func combineMessages(modelMessages []model.Message, userMessages []model.Message
 	return combinedMessages, nil
 }
 
-// transformRequestForProvider transforms the request for a specific provider
 func transformRequestForProvider(originalBody []byte, nextProvider, nextModel string, client *Client) ([]byte, error) {
 	var jsonData []byte
 	var err error
@@ -459,7 +468,12 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 	switch provider {
 	case "azure":
 		req.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", modelName)
-		req.URL.RawQuery = "api-version=2023-05-15"
+		// Use API version from config or fall back to default
+		apiVersion := client.HttpClient.config.AzureAPIVersion
+		if apiVersion == "" {
+			apiVersion = "2023-05-15"
+		}
+		req.URL.RawQuery = fmt.Sprintf("api-version=%s", apiVersion)
 	case "vertex":
 		projectID := client.HttpClient.config.VertexProjectID
 		location := client.HttpClient.config.VertexLocation

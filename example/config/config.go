@@ -67,5 +67,6 @@ func GetModelConfig() model.Config {
 	modelConfig := test_ordered.OrderedModels
 	modelConfig.VertexProjectID = cfg.VertexProjectID
 	modelConfig.VertexLocation = cfg.VertexLocation
+	modelConfig.AzureAPIVersion = cfg.AzureAPIVersion
 	return modelConfig
 }

@@ -13,21 +13,18 @@ import (
 )
 
 // ExtractModelFromRequest extracts the model from the request body.
-func ExtractModelFromRequest(req *http.Request) string {
+func ExtractModelFromRequest(req *http.Request) (string, error) {
 	if req == nil {
-		slog.Error("❌ Request is nil in ExtractModelFromRequest")
-		return ""
+		return "", fmt.Errorf("request is nil")
 	}
 
 	if req.Body == nil {
-		slog.Error("❌ Request body is nil in ExtractModelFromRequest")
-		return ""
+		return "", fmt.Errorf("request body is nil")
 	}
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		slog.Error("❌ Failed to read body in ExtractModelFromRequest", "error", err)
-		return ""
+		return "", fmt.Errorf("failed to read body: %w", err)
 	}
 
 	// Always restore the body for future reads
@@ -35,26 +32,25 @@ func ExtractModelFromRequest(req *http.Request) string {
 
 	// Handle empty body
 	if len(body) == 0 {
-		slog.Error("❌ Empty request body in ExtractModelFromRequest")
-		return ""
+		return "", fmt.Errorf("empty request body")
 	}
 
 	var payload map[string]interface{}
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
-		slog.Error("❌ Failed to unmarshal in ExtractModelFromRequest", "error", err)
-		return ""
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", fmt.Errorf("failed to unmarshal body: %w", err)
 	}
 
-	if modelStr, ok := payload["model"].(string); ok {
-		// If it's in provider/model format, extract just the model part
-		parts := strings.Split(modelStr, "/")
-		if len(parts) == 2 {
-			return parts[1] // Return just the model part
-		}
-		return modelStr
+	modelStr, ok := payload["model"].(string)
+	if !ok {
+		return "", fmt.Errorf("model field not found or not a string")
 	}
-	return ""
+
+	// If it's in provider/model format, extract just the model part
+	parts := strings.Split(modelStr, "/")
+	if len(parts) == 2 {
+		return parts[1], nil // Return just the model part
+	}
+	return modelStr, nil
 }
 
 // ExtractProviderFromRequest extracts the provider from the request URL or model name.
@@ -73,7 +69,11 @@ func ExtractProviderFromRequest(req *http.Request) string {
 	}
 
 	// If not found in URL, try to extract from model name
-	model := ExtractModelFromRequest(req)
+	model, err := ExtractModelFromRequest(req)
+	if err != nil {
+		slog.Error("❌ Error extracting model from request", "error", err)
+		return ""
+	}
 	if strings.HasPrefix(model, "vertex/") {
 		return "vertex"
 	} else if strings.HasPrefix(model, "azure/") {
