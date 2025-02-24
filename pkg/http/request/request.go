@@ -131,7 +131,16 @@ func extractVertexMessages(body []byte) []model.Message {
 		return nil
 	}
 
-	var messages []model.Message
+	// Check if contents field exists in the JSON
+	var rawPayload map[string]interface{}
+	if err := json.Unmarshal(body, &rawPayload); err != nil {
+		return nil
+	}
+	if _, exists := rawPayload["contents"]; !exists {
+		return nil
+	}
+
+	messages := make([]model.Message, 0)
 	for _, content := range payload.Contents {
 		if len(content.Parts) > 0 {
 			messages = append(messages, model.Message{
