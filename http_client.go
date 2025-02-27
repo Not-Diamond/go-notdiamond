@@ -156,29 +156,17 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 
 			// For the current model, add region-specific versions at the front
 			if extractedProvider == "vertex" {
-				// Default regions for Vertex: us-central1, us-west1, us-east1, etc.
-				defaultRegions := []string{"us-central1", "us-west1", "us-east1", "us-west4"}
-				for _, r := range defaultRegions {
-					regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/"+r)
-				}
-			} else if extractedProvider == "openai" {
-				// For OpenAI, we might have different regions
-				defaultRegions := []string{"us", "eu"}
-				for _, r := range defaultRegions {
-					regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/"+r)
-				}
+				// Default to us-east1 if no region is specified
+				regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/us-east1")
 			} else if extractedProvider == "azure" {
-				// For Azure, we might have different regions
-				defaultRegions := []string{"eastus", "westus", "westeurope"}
-				for _, r := range defaultRegions {
-					regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/"+r)
-				}
+				// Default to eastus for Azure
+				regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/eastus")
 			}
 
 			// Add the base model without region
 			regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel)
 
-			// Add the rest of the models
+			// Add models from config
 			for _, m := range modelsToTry {
 				// Skip if already added
 				alreadyAdded := false
@@ -685,13 +673,15 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 		}
 		req.URL.RawQuery = fmt.Sprintf("api-version=%s", apiVersion)
 
-		// Apply region if specified
-		if region != "" {
-			// Update the host to include the region
-			hostParts := strings.Split(req.URL.Host, ".")
-			if len(hostParts) > 1 {
-				// Format: {endpoint-name}.{region}.api.cognitive.microsoft.com
-				req.URL.Host = fmt.Sprintf("%s.%s.api.cognitive.microsoft.com", hostParts[0], region)
+		// Apply region if specified and exists in AzureRegions map
+		if region != "" && client.HttpClient.config.AzureRegions != nil {
+			if endpoint, ok := client.HttpClient.config.AzureRegions[region]; ok {
+				// Use the endpoint from the AzureRegions map
+				req.URL.Host = strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+				req.URL.Scheme = "https"
+				slog.Info("🔄 Using Azure endpoint from AzureRegions map", "region", region, "endpoint", endpoint)
+			} else {
+				slog.Warn("🔄 Region not found in AzureRegions map, using default endpoint", "region", region)
 			}
 		}
 	case "vertex":
@@ -744,11 +734,7 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 
 		slog.Info("🔄 Updated Vertex URL", "host", req.URL.Host, "path", req.URL.Path)
 	case "openai":
-		// For OpenAI, we can potentially use different base URLs for different regions
-		if region != "" {
-			// Example: if region is "eu", use "eu.api.openai.com"
-			req.URL.Host = fmt.Sprintf("%s.api.openai.com", region)
-		}
+		// No region-specific handling for OpenAI
 	}
 
 	slog.Info("🔄 Updated request URL", "new_url", req.URL.String())

@@ -322,6 +322,11 @@ func TestTryWithRetries(t *testing.T) {
 			ctx := context.WithValue(context.Background(), clientKey, &Client{
 				clients:    []http.Request{*req},
 				HttpClient: httpClient,
+				modelProviders: map[string]map[string]bool{
+					"openai": {
+						"gpt-4": true,
+					},
+				},
 			})
 
 			resp, err := httpClient.tryWithRetries(tt.modelFull, req, tt.messages, ctx)
@@ -465,6 +470,11 @@ func TestTryNextModel(t *testing.T) {
 						},
 						metricsTracker: metrics,
 					},
+					modelProviders: map[string]map[string]bool{
+						"azure": {
+							"gpt-4": true,
+						},
+					},
 				}, transport
 			},
 			expectedURL: "https://myresource.azure.openai.com/openai/deployments/gpt-4/chat/completions?api-version=2023-05-15",
@@ -531,6 +541,11 @@ func TestTryNextModel(t *testing.T) {
 						},
 						metricsTracker: metrics,
 					},
+					modelProviders: map[string]map[string]bool{
+						"openai": {
+							"gpt-4": true,
+						},
+					},
 				}, transport
 			},
 			checkRequest: func(t *testing.T, req *http.Request) {
@@ -583,6 +598,11 @@ func TestTryNextModel(t *testing.T) {
 						},
 						metricsTracker: metrics,
 					},
+					modelProviders: map[string]map[string]bool{
+						"unknown": {
+							"gpt-4": true,
+						},
+					},
 				}, transport
 			},
 			expectedError: "no client found for provider unknown",
@@ -629,6 +649,11 @@ func TestTryNextModel(t *testing.T) {
 							},
 						},
 						metricsTracker: metrics,
+					},
+					modelProviders: map[string]map[string]bool{
+						"openai": {
+							"gpt-4": true,
+						},
 					},
 				}, transport
 			},
@@ -1062,24 +1087,36 @@ func TestDo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, transport := tt.setupClient()
 
-			// Create a request with the necessary context
-			req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
+			// Create requests for both OpenAI and Azure
+			openaiReq, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
 				bytes.NewBufferString(`{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`))
+			openaiReq.Header.Set("Authorization", "Bearer test-key")
+
+			azureReq, _ := http.NewRequest("POST", "https://myresource.azure.openai.com",
+				bytes.NewBufferString(`{"messages":[{"role":"user","content":"Hello"}]}`))
+			azureReq.Header.Set("api-key", "test-key")
 
 			// Create NotDiamondClient and add it to context
 			notDiamondClient := &Client{
 				HttpClient: client,
-				clients:    []http.Request{*req}, // Add the client request to the clients list
-				models:     model.OrderedModels{"openai/gpt-4/us", "openai/gpt-4/eu", "openai/gpt-4", "azure/gpt-4"},
-				isOrdered:  true,
+				clients:    []http.Request{*openaiReq, *azureReq}, // Add both client requests to the clients list
+				models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				modelProviders: map[string]map[string]bool{
+					"openai": {
+						"gpt-4": true,
+					},
+					"azure": {
+						"gpt-4": true,
+					},
+				},
+				isOrdered: true,
 			}
 			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
-			req = req.WithContext(ctx)
+			openaiReq = openaiReq.WithContext(ctx)
 
 			// Make the request
-			resp, err := client.Do(req)
+			resp, err := client.Do(openaiReq)
 
-			// Verify error expectations
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error but got none")
@@ -1089,7 +1126,6 @@ func TestDo(t *testing.T) {
 				return
 			}
 
-			// Verify success case
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
@@ -1100,7 +1136,6 @@ func TestDo(t *testing.T) {
 				return
 			}
 
-			// Verify number of calls made
 			if transport.callCount != tt.expectedCalls {
 				t.Errorf("expected %d calls but got %d", tt.expectedCalls, transport.callCount)
 			}
@@ -1374,21 +1409,35 @@ func TestDoWithLatencies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, transport := tt.setupClient()
 
-			// Create a request with the necessary context.
-			req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
+			// Create requests for both OpenAI and Azure
+			openaiReq, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
 				bytes.NewBufferString(`{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`))
-			// Create a NotDiamondClient and add it to the context.
+			openaiReq.Header.Set("Authorization", "Bearer test-key")
+
+			azureReq, _ := http.NewRequest("POST", "https://myresource.azure.openai.com",
+				bytes.NewBufferString(`{"messages":[{"role":"user","content":"Hello"}]}`))
+			azureReq.Header.Set("api-key", "test-key")
+
+			// Create NotDiamondClient and add it to context
 			notDiamondClient := &Client{
 				HttpClient: client,
-				clients:    []http.Request{*req}, // Add the client request to the clients list
-				models:     model.OrderedModels{"openai/gpt-4/us", "openai/gpt-4/eu", "openai/gpt-4", "azure/gpt-4"},
-				isOrdered:  true,
+				clients:    []http.Request{*openaiReq, *azureReq}, // Add both client requests to the clients list
+				models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				modelProviders: map[string]map[string]bool{
+					"openai": {
+						"gpt-4": true,
+					},
+					"azure": {
+						"gpt-4": true,
+					},
+				},
+				isOrdered: true,
 			}
 			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
-			req = req.WithContext(ctx)
+			openaiReq = openaiReq.WithContext(ctx)
 
-			// Make the request.
-			resp, err := client.Do(req)
+			// Make the request
+			resp, err := client.Do(openaiReq)
 
 			if tt.expectError {
 				if err == nil {
