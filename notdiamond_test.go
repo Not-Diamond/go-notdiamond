@@ -113,7 +113,7 @@ func TestInit(t *testing.T) {
 				Models: model.OrderedModels{"invalid-model-format"},
 			},
 			wantErr:   true,
-			errString: "invalid model format: invalid-model-format (expected 'provider/model')",
+			errString: "invalid model format: invalid-model-format (expected 'provider/model' or 'provider/model/region')",
 		},
 		{
 			name: "invalid - unknown provider",

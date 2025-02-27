@@ -72,7 +72,23 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 	extractedProvider := request.ExtractProviderFromRequest(req.Clone(req.Context()))
 
-	currentModel := extractedProvider + "/" + extractedModel
+	// Parse model and region if present
+	modelParts := strings.Split(extractedModel, "/")
+	baseModel := modelParts[0]
+	region := ""
+	if len(modelParts) > 1 {
+		region = modelParts[1]
+	}
+
+	// Construct the current model string
+	var currentModel string
+	if region != "" {
+		currentModel = extractedProvider + "/" + baseModel + "/" + region
+		slog.Info("🔍 Using model with region", "model", currentModel)
+	} else {
+		currentModel = extractedProvider + "/" + baseModel
+		slog.Info("🔍 Using model without region", "model", currentModel)
+	}
 
 	// Restore the original body for future operations
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
@@ -95,38 +111,107 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 			modelsToTry = client.models.(model.OrderedModels)
 			// Validate that requested model is in the configured list
 			modelExists := false
+
+			// Check if the model (without region) exists in the configured list
+			baseCurrentModel := extractedProvider + "/" + baseModel
 			for _, m := range modelsToTry {
+				// Strip region from configured model if present
+				configModelParts := strings.Split(m, "/")
+				configBaseModel := configModelParts[0] + "/" + configModelParts[1]
+
+				if configBaseModel == baseCurrentModel {
+					modelExists = true
+					break
+				}
+
+				// Also check if the exact model with region matches
 				if m == currentModel {
 					modelExists = true
 					break
 				}
 			}
+
 			if !modelExists {
-				return nil, fmt.Errorf("requested model %s is not in the configured model list", currentModel)
+				return nil, fmt.Errorf("requested model %s is not in the configured model list", baseCurrentModel)
 			}
 		} else {
 			modelsToTry = getWeightedModelsList(client.models.(model.WeightedModels))
 		}
 
-		// Move the requested model to the front of the slice
-		for i, m := range modelsToTry {
-			if m == currentModel {
-				// Remove it from its current position and insert at front
-				modelsToTry = append(modelsToTry[:i], modelsToTry[i+1:]...)
-				modelsToTry = append([]string{currentModel}, modelsToTry...)
-				break
+		// If region is specified, try that specific region first
+		if region != "" {
+			// Move the requested model to the front of the slice
+			for i, m := range modelsToTry {
+				if m == currentModel {
+					// Remove it from its current position and insert at front
+					modelsToTry = append(modelsToTry[:i], modelsToTry[i+1:]...)
+					modelsToTry = append([]string{currentModel}, modelsToTry...)
+					break
+				}
 			}
+		} else {
+			// If no region specified, use default regions for each provider
+			// Create a new slice with region-specific models at the front
+			regionSpecificModels := []string{}
+
+			// For the current model, add region-specific versions at the front
+			if extractedProvider == "vertex" {
+				// Default regions for Vertex: us-central1, us-west1, us-east1, etc.
+				defaultRegions := []string{"us-central1", "us-west1", "us-east1", "us-west4"}
+				for _, r := range defaultRegions {
+					regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/"+r)
+				}
+			} else if extractedProvider == "openai" {
+				// For OpenAI, we might have different regions
+				defaultRegions := []string{"us", "eu"}
+				for _, r := range defaultRegions {
+					regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/"+r)
+				}
+			} else if extractedProvider == "azure" {
+				// For Azure, we might have different regions
+				defaultRegions := []string{"eastus", "westus", "westeurope"}
+				for _, r := range defaultRegions {
+					regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel+"/"+r)
+				}
+			}
+
+			// Add the base model without region
+			regionSpecificModels = append(regionSpecificModels, extractedProvider+"/"+baseModel)
+
+			// Add the rest of the models
+			for _, m := range modelsToTry {
+				// Skip if already added
+				alreadyAdded := false
+				for _, added := range regionSpecificModels {
+					if m == added {
+						alreadyAdded = true
+						break
+					}
+				}
+
+				if !alreadyAdded {
+					regionSpecificModels = append(regionSpecificModels, m)
+				}
+			}
+
+			modelsToTry = regionSpecificModels
 		}
+
+		slog.Info("🔄 Models to try (in order)", "models", strings.Join(modelsToTry, ", "))
 
 		for _, modelFull := range modelsToTry {
 			// Reset the request body for each attempt
 			req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
 
+			slog.Info("🔍 Trying model", "model", modelFull)
 			if resp, err := c.tryWithRetries(modelFull, req, messages, originalCtx); err == nil {
 				return resp, nil
 			} else {
 				lastErr = err
 				slog.Error("❌ Attempt failed", "model", modelFull, "error", err.Error())
+
+				// If this was a region-specific model that failed, try the next one
+				// This implements the region fallback mechanism
 			}
 		}
 	}
@@ -200,22 +285,122 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		var reqErr error
 
 		if attempt == 0 {
-			extractedModel, err := request.ExtractModelFromRequest(req)
-			if err != nil {
-				return nil, fmt.Errorf("failed to extract model: %w", err)
-			}
+			// We only need the provider from the request
 			extractedProvider := request.ExtractProviderFromRequest(req)
-			if modelFull == extractedProvider+"/"+extractedModel {
-				currentReq := req.Clone(ctx)
-				// Read and preserve the original request body
-				body, err := io.ReadAll(currentReq.Body)
-				if err != nil {
-					return nil, err
+
+			// Extract parts from modelFull (provider/model/region)
+			modelFullParts := strings.Split(modelFull, "/")
+			modelFullProvider := modelFullParts[0]
+			modelFullBase := ""
+			if len(modelFullParts) > 1 {
+				modelFullBase = modelFullParts[1]
+			}
+
+			// Read and preserve the original request body
+			originalBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, err
+			}
+			req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
+
+			// Log the original request URL before any modifications
+			slog.Info("🔄 Original request URL", "url", req.URL.String())
+
+			// Check if we're switching providers
+			if modelFullProvider != extractedProvider {
+				slog.Info("🔄 Switching provider", "from", extractedProvider, "to", modelFullProvider)
+
+				// Get client from context
+				if client, ok := originalCtx.Value(clientKey).(*Client); ok {
+					// Find the appropriate client request for the new provider
+					var foundClientReq *http.Request
+					for _, clientReq := range client.clients {
+						url := clientReq.URL.String()
+						switch modelFullProvider {
+						case "vertex":
+							if strings.Contains(url, "aiplatform.googleapis.com") {
+								foundClientReq = &clientReq
+								break
+							}
+						case "azure":
+							if strings.Contains(url, "azure") {
+								foundClientReq = &clientReq
+								break
+							}
+						case "openai":
+							if strings.Contains(url, "openai.com") {
+								foundClientReq = &clientReq
+								break
+							}
+						}
+					}
+
+					if foundClientReq != nil {
+						// Create a new request with the appropriate URL and headers
+						newReq := foundClientReq.Clone(ctx)
+
+						// Transform the request body for the new provider
+						transformedBody, err := transformRequestForProvider(originalBody, modelFullProvider, modelFullBase, client)
+						if err != nil {
+							return nil, fmt.Errorf("failed to transform request body: %w", err)
+						}
+
+						newReq.Body = io.NopCloser(bytes.NewBuffer(transformedBody))
+						newReq.ContentLength = int64(len(transformedBody))
+
+						// Update the URL to include the region if present
+						if len(modelFullParts) > 2 && modelFullParts[2] != "" {
+							if err := updateRequestURL(newReq, modelFullProvider, modelFullBase+"/"+modelFullParts[2], client); err != nil {
+								return nil, fmt.Errorf("failed to update URL with region: %w", err)
+							}
+						} else {
+							if err := updateRequestURL(newReq, modelFullProvider, modelFullBase, client); err != nil {
+								return nil, fmt.Errorf("failed to update URL: %w", err)
+							}
+						}
+
+						// Update authentication
+						if err := updateRequestAuth(newReq, modelFullProvider, ctx); err != nil {
+							return nil, fmt.Errorf("failed to update authentication: %w", err)
+						}
+
+						// Log the updated request URL
+						slog.Info("🔄 Modified request URL for provider switch", "url", newReq.URL.String())
+
+						// Use a raw client for the request
+						rawClient := &http.Client{}
+						resp, reqErr = rawClient.Do(newReq)
+					} else {
+						reqErr = fmt.Errorf("no client found for provider %s", modelFullProvider)
+					}
 				}
-				currentReq.Body = io.NopCloser(bytes.NewBuffer(body))
+			} else {
+				// Same provider, just update the URL with region if needed
+				// Update the URL to include the region if present in modelFull
+				if len(modelFullParts) > 2 && modelFullParts[2] != "" {
+					// Get client from context
+					if client, ok := originalCtx.Value(clientKey).(*Client); ok {
+						// Update the request URL with the region
+						if err := updateRequestURL(req, modelFullProvider, modelFullBase+"/"+modelFullParts[2], client); err != nil {
+							return nil, fmt.Errorf("failed to update URL with region: %w", err)
+						}
+					}
+				}
+
+				// Log the updated request URL after modifications
+				slog.Info("🔄 Modified request URL", "url", req.URL.String())
+
+				// Update authentication for the request
+				if modelFullProvider == "vertex" {
+					if err := updateRequestAuth(req, modelFullProvider, ctx); err != nil {
+						return nil, fmt.Errorf("failed to update authentication: %w", err)
+					}
+					slog.Info("🔑 Updated authentication for Vertex AI")
+				}
+
 				// Use a raw client for the initial request
 				rawClient := &http.Client{}
-				resp, reqErr = rawClient.Do(currentReq)
+				resp, reqErr = rawClient.Do(req)
 			}
 		} else {
 			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
@@ -286,24 +471,39 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 				}, nil
 			}
 
-			// Parse error response body if possible
-			var errorResponse struct {
-				Error struct {
-					Message string `json:"message"`
-					Type    string `json:"type"`
-				} `json:"error"`
-			}
-			if unmarshalErr := json.Unmarshal(body, &errorResponse); unmarshalErr == nil && errorResponse.Error.Message != "" {
-				lastErr = fmt.Errorf("with status %d (%s): %s",
-					resp.StatusCode,
-					http.StatusText(resp.StatusCode),
-					errorResponse.Error.Message)
+			// Special handling for 404 errors with Vertex AI, which might indicate a non-existent region
+			if resp.StatusCode == 404 && strings.HasPrefix(modelFull, "vertex/") {
+				modelParts := strings.Split(modelFull, "/")
+				if len(modelParts) > 2 {
+					region := modelParts[2]
+					slog.Error("❌ Region not found", "model", modelFull, "region", region, "status_code", resp.StatusCode)
+					lastErr = fmt.Errorf("region %s not found for model %s: %d %s",
+						region, modelParts[1], resp.StatusCode, http.StatusText(resp.StatusCode))
+				} else {
+					slog.Error("❌ Model or project not found", "model", modelFull, "status_code", resp.StatusCode)
+					lastErr = fmt.Errorf("model or project not found: %d %s",
+						resp.StatusCode, http.StatusText(resp.StatusCode))
+				}
 			} else {
-				// Fallback to raw body if can't parse error response
-				lastErr = fmt.Errorf("with status %d (%s): %s",
-					resp.StatusCode,
-					http.StatusText(resp.StatusCode),
-					string(body))
+				// Parse error response body if possible
+				var errorResponse struct {
+					Error struct {
+						Message string `json:"message"`
+						Type    string `json:"type"`
+					} `json:"error"`
+				}
+				if unmarshalErr := json.Unmarshal(body, &errorResponse); unmarshalErr == nil && errorResponse.Error.Message != "" {
+					lastErr = fmt.Errorf("with status %d (%s): %s",
+						resp.StatusCode,
+						http.StatusText(resp.StatusCode),
+						errorResponse.Error.Message)
+				} else {
+					// Fallback to raw body if can't parse error response
+					lastErr = fmt.Errorf("with status %d (%s): %s",
+						resp.StatusCode,
+						http.StatusText(resp.StatusCode),
+						string(body))
+				}
 			}
 			slog.Error("❌ Request", "failed", lastErr)
 		}
@@ -465,23 +665,93 @@ func transformToVertexFormat(originalBody []byte, modelName string, client *Clie
 
 // updateRequestURL updates the request URL based on the provider and model
 func updateRequestURL(req *http.Request, provider, modelName string, client *Client) error {
+	// Extract region if present in modelName (format: modelName/region)
+	modelParts := strings.Split(modelName, "/")
+	actualModelName := modelParts[0]
+	region := ""
+	if len(modelParts) > 1 {
+		region = modelParts[1]
+	}
+
+	slog.Info("🔄 Updating request URL", "provider", provider, "model", actualModelName, "region", region, "original_url", req.URL.String())
+
 	switch provider {
 	case "azure":
-		req.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", modelName)
+		req.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", actualModelName)
 		// Use API version from config or fall back to default
 		apiVersion := client.HttpClient.config.AzureAPIVersion
 		if apiVersion == "" {
 			apiVersion = "2023-05-15"
 		}
 		req.URL.RawQuery = fmt.Sprintf("api-version=%s", apiVersion)
+
+		// Apply region if specified
+		if region != "" {
+			// Update the host to include the region
+			hostParts := strings.Split(req.URL.Host, ".")
+			if len(hostParts) > 1 {
+				// Format: {endpoint-name}.{region}.api.cognitive.microsoft.com
+				req.URL.Host = fmt.Sprintf("%s.%s.api.cognitive.microsoft.com", hostParts[0], region)
+			}
+		}
 	case "vertex":
 		projectID := client.HttpClient.config.VertexProjectID
+
+		// Check if project ID is valid
+		if projectID == "" {
+			return fmt.Errorf("vertex project ID is not set in the configuration")
+		}
+
+		// Log the project ID being used
+		slog.Info("🔄 Using project ID for Vertex AI", "project_id", projectID)
+
+		// Use specified region or fall back to config location
 		location := client.HttpClient.config.VertexLocation
+		if region != "" {
+			location = region
+		}
+
+		// Log the location being used
+		slog.Info("🔄 Using location for Vertex AI", "location", location)
+
+		// Update the host with the region
 		req.URL.Host = fmt.Sprintf("%s-aiplatform.googleapis.com", location)
 		req.URL.Scheme = "https"
-		req.URL.Path = fmt.Sprintf("/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
-			projectID, location, modelName)
+
+		// Check if the path already contains a location and replace it
+		path := req.URL.Path
+		if strings.Contains(path, "/locations/") {
+			// Extract the existing path components
+			pathParts := strings.Split(path, "/")
+			for i, part := range pathParts {
+				if part == "locations" && i+1 < len(pathParts) {
+					// Replace the location in the path
+					oldLocation := pathParts[i+1]
+					pathParts[i+1] = location
+					path = strings.Join(pathParts, "/")
+					slog.Info("🔄 Replaced location in path", "old_location", oldLocation, "new_location", location)
+					break
+				}
+			}
+			req.URL.Path = path
+		} else {
+			// If path doesn't already have a location, construct a new path
+			newPath := fmt.Sprintf("/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
+				projectID, location, actualModelName)
+			slog.Info("🔄 Constructed new path", "project_id", projectID, "location", location, "model", actualModelName)
+			req.URL.Path = newPath
+		}
+
+		slog.Info("🔄 Updated Vertex URL", "host", req.URL.Host, "path", req.URL.Path)
+	case "openai":
+		// For OpenAI, we can potentially use different base URLs for different regions
+		if region != "" {
+			// Example: if region is "eu", use "eu.api.openai.com"
+			req.URL.Host = fmt.Sprintf("%s.api.openai.com", region)
+		}
 	}
+
+	slog.Info("🔄 Updated request URL", "new_url", req.URL.String())
 	return nil
 }
 
@@ -520,7 +790,20 @@ func updateRequestAuth(req *http.Request, provider string, ctx context.Context) 
 // tryNextModel tries the next model.
 func tryNextModel(client *Client, modelFull string, messages []model.Message, ctx context.Context, originalReq *http.Request) (*http.Response, error) {
 	parts := strings.Split(modelFull, "/")
-	nextProvider, nextModel := parts[0], parts[1]
+
+	// Handle model format with region: provider/model/region
+	nextProvider := parts[0]
+	nextModel := parts[1]
+	nextRegion := ""
+
+	// If we have a region specified
+	if len(parts) > 2 {
+		nextRegion = parts[2]
+		nextModel = nextModel + "/" + nextRegion
+		slog.Info("🔄 Trying model with region", "provider", nextProvider, "model", nextModel, "region", nextRegion)
+	} else {
+		slog.Info("🔄 Trying model without region", "provider", nextProvider, "model", nextModel)
+	}
 
 	var nextReq *http.Request
 
@@ -568,23 +851,28 @@ found:
 		return nil, fmt.Errorf("failed to transform request: %w", err)
 	}
 
-	nextReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	// Create a new request with the transformed body
+	// This ensures we're using the correct URL and headers from the target provider's client
+	newReq := nextReq.Clone(ctx)
+	newReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	newReq.ContentLength = int64(len(jsonData))
 
 	// Initialize headers if nil
-	if nextReq.Header == nil {
-		nextReq.Header = make(http.Header)
+	if newReq.Header == nil {
+		newReq.Header = make(http.Header)
 	}
-	nextReq.Header.Set("Content-Type", "application/json")
+	newReq.Header.Set("Content-Type", "application/json")
 
 	// Update request URL
-	if err := updateRequestURL(nextReq, nextProvider, nextModel, client); err != nil {
+	if err := updateRequestURL(newReq, nextProvider, nextModel, client); err != nil {
 		return nil, fmt.Errorf("failed to update URL: %w", err)
 	}
 
 	// Update authentication
-	if err := updateRequestAuth(nextReq, nextProvider, ctx); err != nil {
+	if err := updateRequestAuth(newReq, nextProvider, ctx); err != nil {
 		return nil, fmt.Errorf("failed to update authentication: %w", err)
 	}
 
-	return client.HttpClient.Client.Do(nextReq)
+	// Use the client's HTTP client to make the request
+	return client.HttpClient.Client.Do(newReq)
 }

@@ -86,7 +86,16 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to marshal payload: %v", err)
 		}
-		req, err = vertex.NewRequest(cfg.VertexProjectID, cfg.VertexLocation)
+		req, err = http.NewRequest("POST", vertexRequest.URL.String(), io.NopCloser(bytes.NewBuffer(jsonData)))
+		if err != nil {
+			log.Fatalf("Failed to create request: %v", err)
+		}
+		// Copy headers from the vertex request
+		for key, values := range vertexRequest.Header {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
 	} else {
 		openaiPayload := map[string]interface{}{
 			"model": "gpt-4o-mini", // Non-existent model to trigger fallback
@@ -101,14 +110,17 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to marshal payload: %v", err)
 		}
-		req, err = openai.NewRequest("https://api.openai.com/v1/chat/completions", cfg.OpenAIAPIKey)
+		req, err = http.NewRequest("POST", azureRequest.URL.String(), io.NopCloser(bytes.NewBuffer(jsonData)))
+		if err != nil {
+			log.Fatalf("Failed to create request: %v", err)
+		}
+		// Copy headers from the openai request
+		for key, values := range azureRequest.Header {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
 	}
-
-	if err != nil {
-		log.Fatalf("Failed to create request: %v", err)
-	}
-
-	req.Body = io.NopCloser(bytes.NewBuffer(jsonData))
 
 	// Make request with transport client
 	start := time.Now()
