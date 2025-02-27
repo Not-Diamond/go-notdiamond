@@ -644,3 +644,59 @@ func TestErrorTrackingRecoveryTimeExpiration(t *testing.T) {
 		t.Errorf("Expected 100%% 401 errors after recovery, got %.2f%%", percentage)
 	}
 }
+
+func TestClearAllModelData(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	client, err := NewClient(Config{
+		Addr:     mr.Addr(),
+		Password: "",
+		DB:       0,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create Redis client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	model := "test-model"
+
+	// Set up various keys for the model
+	keys := []string{
+		fmt.Sprintf("latency:%s:recovery", model),
+		fmt.Sprintf("errors:%s:recovery", model),
+		fmt.Sprintf("latency:%s", model),
+		fmt.Sprintf("latency:%s:counter", model),
+		fmt.Sprintf("errors:%s", model),
+		fmt.Sprintf("errors:%s:counter", model),
+	}
+
+	// Set values in Redis for each key
+	for _, key := range keys {
+		mr.Set(key, "test-value")
+	}
+
+	// Verify keys exist
+	for _, key := range keys {
+		if !mr.Exists(key) {
+			t.Errorf("Key %s does not exist before test", key)
+		}
+	}
+
+	// Call the function to clear all keys
+	err = client.ClearAllModelData(ctx, model)
+	if err != nil {
+		t.Errorf("ClearAllModelData() error = %v", err)
+	}
+
+	// Verify keys no longer exist
+	for _, key := range keys {
+		if mr.Exists(key) {
+			t.Errorf("Key %s still exists after ClearAllModelData", key)
+		}
+	}
+}
