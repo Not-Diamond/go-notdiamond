@@ -1,4 +1,4 @@
-package notdiamond
+package http_client
 
 import (
 	"bytes"
@@ -98,12 +98,12 @@ func TestCombineMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := combineMessages(tt.modelMessages, tt.userMessages)
+			got, err := CombineMessages(tt.modelMessages, tt.userMessages)
 			if err != nil {
-				t.Errorf("combineMessages() = %v, want %v", err, nil)
+				t.Errorf("CombineMessages() = %v, want %v", err, nil)
 			}
 			if !reflect.DeepEqual(got, tt.expected) {
-				t.Errorf("combineMessages() = %v, want %v", got, tt.expected)
+				t.Errorf("CombineMessages() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
@@ -291,20 +291,20 @@ func TestTryWithRetries(t *testing.T) {
 
 			httpClient := &NotDiamondHttpClient{
 				Client: &http.Client{Transport: transport},
-				config: model.Config{
+				Config: model.Config{
 					MaxRetries:    tt.maxRetries,
 					Timeout:       tt.timeout,
 					Backoff:       tt.backoff,
 					ModelMessages: tt.modelMessages,
 					ModelLatency:  tt.modelLatency,
 				},
-				metricsTracker: metrics,
+				MetricsTracker: metrics,
 			}
 
-			ctx := context.WithValue(context.Background(), clientKey, &Client{
-				clients:    []http.Request{*req},
+			ctx := context.WithValue(context.Background(), ClientKey, &Client{
+				Clients:    []http.Request{*req},
 				HttpClient: httpClient,
-				modelProviders: map[string]map[string]bool{
+				ModelProviders: map[string]map[string]bool{
 					"openai": {
 						"gpt-4": true,
 					},
@@ -435,12 +435,12 @@ func TestTryNextModel(t *testing.T) {
 				}
 
 				return &Client{
-					clients: []http.Request{*req},
+					Clients: []http.Request{*req},
 					HttpClient: &NotDiamondHttpClient{
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: model.Config{
+						Config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"azure/gpt-4": {
 									{"role": "system", "content": "Hello"},
@@ -450,9 +450,9 @@ func TestTryNextModel(t *testing.T) {
 								Addr: mr.Addr(),
 							},
 						},
-						metricsTracker: metrics,
+						MetricsTracker: metrics,
 					},
-					modelProviders: map[string]map[string]bool{
+					ModelProviders: map[string]map[string]bool{
 						"azure": {
 							"gpt-4": true,
 						},
@@ -506,12 +506,12 @@ func TestTryNextModel(t *testing.T) {
 					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
 				return &Client{
-					clients: []http.Request{*req},
+					Clients: []http.Request{*req},
 					HttpClient: &NotDiamondHttpClient{
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: model.Config{
+						Config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"openai/gpt-4": {
 									{"role": "system", "content": "Hello"},
@@ -521,9 +521,9 @@ func TestTryNextModel(t *testing.T) {
 								Addr: mr.Addr(),
 							},
 						},
-						metricsTracker: metrics,
+						MetricsTracker: metrics,
 					},
-					modelProviders: map[string]map[string]bool{
+					ModelProviders: map[string]map[string]bool{
 						"openai": {
 							"gpt-4": true,
 						},
@@ -563,12 +563,12 @@ func TestTryNextModel(t *testing.T) {
 				}
 
 				return &Client{
-					clients: []http.Request{*req},
+					Clients: []http.Request{*req},
 					HttpClient: &NotDiamondHttpClient{
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: model.Config{
+						Config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"unknown/gpt-4": {
 									{"role": "user", "content": "Hello"},
@@ -578,9 +578,9 @@ func TestTryNextModel(t *testing.T) {
 								Addr: mr.Addr(),
 							},
 						},
-						metricsTracker: metrics,
+						MetricsTracker: metrics,
 					},
-					modelProviders: map[string]map[string]bool{
+					ModelProviders: map[string]map[string]bool{
 						"unknown": {
 							"gpt-4": true,
 						},
@@ -615,12 +615,12 @@ func TestTryNextModel(t *testing.T) {
 					t.Fatalf("Failed to create metrics tracker: %v", err)
 				}
 				return &Client{
-					clients: []http.Request{*req},
+					Clients: []http.Request{*req},
 					HttpClient: &NotDiamondHttpClient{
 						Client: &http.Client{
 							Transport: transport,
 						},
-						config: model.Config{
+						Config: model.Config{
 							ModelMessages: map[string][]model.Message{
 								"openai/gpt-4": {
 									{"role": "system", "content": "Hello"},
@@ -630,9 +630,9 @@ func TestTryNextModel(t *testing.T) {
 								Addr: mr.Addr(),
 							},
 						},
-						metricsTracker: metrics,
+						MetricsTracker: metrics,
 					},
-					modelProviders: map[string]map[string]bool{
+					ModelProviders: map[string]map[string]bool{
 						"openai": {
 							"gpt-4": true,
 						},
@@ -955,7 +955,7 @@ func TestGetMaxRetriesForStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &NotDiamondHttpClient{
-				config: model.Config{
+				Config: model.Config{
 					MaxRetries:      tt.maxRetries,
 					StatusCodeRetry: tt.statusCodeRetry,
 				},
@@ -1016,7 +1016,7 @@ func TestDo(t *testing.T) {
 
 				client := &NotDiamondHttpClient{
 					Client: &http.Client{Transport: transport},
-					config: model.Config{
+					Config: model.Config{
 						MaxRetries: map[string]int{
 							"openai/gpt-4":    3,
 							"openai/gpt-4/us": 3,
@@ -1055,7 +1055,7 @@ func TestDo(t *testing.T) {
 							Addr: mr.Addr(),
 						},
 					},
-					metricsTracker: metrics,
+					MetricsTracker: metrics,
 				}
 
 				return client, transport
@@ -1081,9 +1081,9 @@ func TestDo(t *testing.T) {
 			// Create NotDiamondClient and add it to context
 			notDiamondClient := &Client{
 				HttpClient: client,
-				clients:    []http.Request{*openaiReq, *azureReq}, // Add both client requests to the clients list
-				models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
-				modelProviders: map[string]map[string]bool{
+				Clients:    []http.Request{*openaiReq, *azureReq}, // Add both client requests to the clients list
+				Models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				ModelProviders: map[string]map[string]bool{
 					"openai": {
 						"gpt-4": true,
 					},
@@ -1091,9 +1091,9 @@ func TestDo(t *testing.T) {
 						"gpt-4": true,
 					},
 				},
-				isOrdered: true,
+				IsOrdered: true,
 			}
-			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
+			ctx := context.WithValue(context.Background(), ClientKey, notDiamondClient)
 			openaiReq = openaiReq.WithContext(ctx)
 
 			// Make the request
@@ -1173,8 +1173,8 @@ func TestDoWithLatencies(t *testing.T) {
 
 				client := &NotDiamondHttpClient{
 					Client:         &http.Client{Transport: transport},
-					metricsTracker: metrics,
-					config: model.Config{
+					MetricsTracker: metrics,
+					Config: model.Config{
 						MaxRetries: map[string]int{
 							"openai/gpt-4":    3,
 							"openai/gpt-4/us": 3,
@@ -1253,8 +1253,8 @@ func TestDoWithLatencies(t *testing.T) {
 
 				client := &NotDiamondHttpClient{
 					Client:         &http.Client{Transport: transport},
-					metricsTracker: metrics,
-					config: model.Config{
+					MetricsTracker: metrics,
+					Config: model.Config{
 						MaxRetries: map[string]int{
 							"openai/gpt-4":    3,
 							"openai/gpt-4/us": 3,
@@ -1339,8 +1339,8 @@ func TestDoWithLatencies(t *testing.T) {
 
 				client := &NotDiamondHttpClient{
 					Client:         &http.Client{Transport: transport},
-					metricsTracker: metrics,
-					config: model.Config{
+					MetricsTracker: metrics,
+					Config: model.Config{
 						MaxRetries: map[string]int{
 							"openai/gpt-4":    3,
 							"openai/gpt-4/us": 3,
@@ -1403,9 +1403,9 @@ func TestDoWithLatencies(t *testing.T) {
 			// Create NotDiamondClient and add it to context
 			notDiamondClient := &Client{
 				HttpClient: client,
-				clients:    []http.Request{*openaiReq, *azureReq}, // Add both client requests to the clients list
-				models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
-				modelProviders: map[string]map[string]bool{
+				Clients:    []http.Request{*openaiReq, *azureReq}, // Add both client requests to the clients list
+				Models:     model.OrderedModels{"openai/gpt-4", "azure/gpt-4"},
+				ModelProviders: map[string]map[string]bool{
 					"openai": {
 						"gpt-4": true,
 					},
@@ -1413,9 +1413,9 @@ func TestDoWithLatencies(t *testing.T) {
 						"gpt-4": true,
 					},
 				},
-				isOrdered: true,
+				IsOrdered: true,
 			}
-			ctx := context.WithValue(context.Background(), clientKey, notDiamondClient)
+			ctx := context.WithValue(context.Background(), ClientKey, notDiamondClient)
 			openaiReq = openaiReq.WithContext(ctx)
 
 			// Make the request

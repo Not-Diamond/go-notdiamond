@@ -1,4 +1,4 @@
-package notdiamond
+package transport
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	http_client "github.com/Not-Diamond/go-notdiamond/pkg/http/client"
 	"github.com/Not-Diamond/go-notdiamond/pkg/http/request"
 	"github.com/Not-Diamond/go-notdiamond/pkg/metric"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
@@ -350,18 +351,18 @@ func TestTransport_RoundTrip(t *testing.T) {
 						},
 					},
 				},
-				client: &Client{
-					HttpClient: &NotDiamondHttpClient{
+				client: &http_client.Client{
+					HttpClient: &http_client.NotDiamondHttpClient{
 						Client: &http.Client{Transport: mockTransport},
-						config: model.Config{
+						Config: model.Config{
 							Models:        model.OrderedModels{"openai/gpt-4"},
 							ModelMessages: tt.modelMessages,
 						},
-						metricsTracker: metrics,
+						MetricsTracker: metrics,
 					},
-					models:    model.OrderedModels{"openai/gpt-4"},
-					isOrdered: true,
-					clients: []http.Request{
+					Models:    model.OrderedModels{"openai/gpt-4"},
+					IsOrdered: true,
+					Clients: []http.Request{
 						{
 							Method: "POST",
 							URL: &url.URL{
@@ -383,7 +384,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer test-key")
 
 			// Add client to context
-			ctx := context.WithValue(req.Context(), clientKey, transport.client)
+			ctx := context.WithValue(req.Context(), http_client.ClientKey, transport.client)
 			req = req.WithContext(ctx)
 
 			// Extract messages and model

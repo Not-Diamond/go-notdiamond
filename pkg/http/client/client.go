@@ -1,4 +1,4 @@
-package notdiamond
+package http_client
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,11 +20,23 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+type Client struct {
+	Clients        []http.Request
+	Models         model.Models
+	ModelProviders map[string]map[string]bool
+	IsOrdered      bool
+	HttpClient     *NotDiamondHttpClient
+}
+
+type contextKey string
+
+const ClientKey contextKey = "notdiamondClient"
+
 // NotDiamondHttpClient is a type that can be used to represent a NotDiamond HTTP client.
 type NotDiamondHttpClient struct {
 	*http.Client
-	config         model.Config
-	metricsTracker *metric.Tracker
+	Config         model.Config
+	MetricsTracker *metric.Tracker
 }
 
 // NewNotDiamondHttpClient creates a new NotDiamond HTTP client.
@@ -44,8 +56,8 @@ func NewNotDiamondHttpClient(config model.Config) (*NotDiamondHttpClient, error)
 
 	return &NotDiamondHttpClient{
 		Client:         &http.Client{},
-		config:         config,
-		metricsTracker: metricsTracker,
+		Config:         config,
+		MetricsTracker: metricsTracker,
 	}, nil
 }
 
@@ -96,7 +108,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	originalCtx := req.Context()
 
-	if client, ok := originalCtx.Value(clientKey).(*Client); ok {
+	if client, ok := originalCtx.Value(ClientKey).(*Client); ok {
 		var modelsToTry []string
 
 		// Read and preserve the original request body
@@ -107,8 +119,8 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 		// Restore the body for future reads
 		req.Body = io.NopCloser(bytes.NewBuffer(originalBody))
 
-		if client.isOrdered {
-			modelsToTry = client.models.(model.OrderedModels)
+		if client.IsOrdered {
+			modelsToTry = client.Models.(model.OrderedModels)
 			// Validate that requested model is in the configured list
 			modelExists := false
 
@@ -135,7 +147,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("requested model %s is not in the configured model list", baseCurrentModel)
 			}
 		} else {
-			modelsToTry = getWeightedModelsList(client.models.(model.WeightedModels))
+			modelsToTry = getWeightedModelsList(client.Models.(model.WeightedModels))
 		}
 
 		// If region is specified, try that specific region first
@@ -210,7 +222,7 @@ func (c *NotDiamondHttpClient) Do(req *http.Request) (*http.Response, error) {
 // getMaxRetriesForStatus gets the maximum retries for a status code.
 func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCode int) int {
 	// Check model-specific status code retries first
-	if modelRetries, ok := c.config.StatusCodeRetry.(map[string]map[string]int); ok {
+	if modelRetries, ok := c.Config.StatusCodeRetry.(map[string]map[string]int); ok {
 		if modelConfig, exists := modelRetries[modelFull]; exists {
 			if retries, hasCode := modelConfig[strconv.Itoa(statusCode)]; hasCode {
 				return retries
@@ -219,14 +231,14 @@ func (c *NotDiamondHttpClient) getMaxRetriesForStatus(modelFull string, statusCo
 	}
 
 	// Check global status code retries
-	if globalRetries, ok := c.config.StatusCodeRetry.(map[string]int); ok {
+	if globalRetries, ok := c.Config.StatusCodeRetry.(map[string]int); ok {
 		if retries, exists := globalRetries[strconv.Itoa(statusCode)]; exists {
 			return retries
 		}
 	}
 
 	// Fall back to default MaxRetries
-	if maxRetries, exists := c.config.MaxRetries[modelFull]; exists {
+	if maxRetries, exists := c.Config.MaxRetries[modelFull]; exists {
 		return maxRetries
 	}
 	return 1
@@ -239,7 +251,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 	// Check model health (both latency and error rate) before starting attempts
 	slog.Info("🏥 Checking initial model health", "model", modelFull)
-	healthy, healthErr := c.metricsTracker.CheckModelOverallHealth(modelFull, c.config)
+	healthy, healthErr := c.MetricsTracker.CheckModelOverallHealth(modelFull, c.Config)
 	if healthErr != nil {
 		lastErr = healthErr
 		slog.Error("❌ Initial health check failed", "model", modelFull, "error", healthErr.Error())
@@ -261,7 +273,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 		slog.Info(fmt.Sprintf("🔄 Request %d of %d for model %s", attempt+1, maxRetries, modelFull))
 
 		timeout := 100.0
-		if t, ok := c.config.Timeout[modelFull]; ok && t > 0 {
+		if t, ok := c.Config.Timeout[modelFull]; ok && t > 0 {
 			timeout = t
 		}
 
@@ -299,10 +311,10 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 				slog.Info("🔄 Switching provider", "from", extractedProvider, "to", modelFullProvider)
 
 				// Get client from context
-				if client, ok := originalCtx.Value(clientKey).(*Client); ok {
+				if client, ok := originalCtx.Value(ClientKey).(*Client); ok {
 					// Find the appropriate client request for the new provider
 					var foundClientReq *http.Request
-					for _, clientReq := range client.clients {
+					for _, clientReq := range client.Clients {
 						url := clientReq.URL.String()
 						switch modelFullProvider {
 						case "vertex":
@@ -370,7 +382,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 				// Update the URL to include the region if present in modelFull
 				if len(modelFullParts) > 2 && modelFullParts[2] != "" {
 					// Get client from context
-					if client, ok := originalCtx.Value(clientKey).(*Client); ok {
+					if client, ok := originalCtx.Value(ClientKey).(*Client); ok {
 						// Update the request URL with the region
 						if err := updateRequestURL(req, modelFullProvider, modelFullBase+"/"+modelFullParts[2], client); err != nil {
 							return nil, fmt.Errorf("failed to update URL with region: %w", err)
@@ -397,7 +409,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 				resp, reqErr = rawClient.Do(req)
 			}
 		} else {
-			if client, ok := originalCtx.Value(clientKey).(*Client); ok {
+			if client, ok := originalCtx.Value(ClientKey).(*Client); ok {
 				resp, reqErr = tryNextModel(client, modelFull, messages, ctx, req)
 			}
 		}
@@ -409,12 +421,12 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			lastErr = reqErr
 			slog.Error("❌ Request", "failed", lastErr)
 			// Record the latency in Redis
-			recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "failed")
+			recErr := c.MetricsTracker.RecordLatency(modelFull, elapsed, "failed")
 			if recErr != nil {
 				slog.Error("error", "recording latency", recErr)
 			}
-			if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
-				time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
+			if attempt < maxRetries-1 && c.Config.Backoff[modelFull] > 0 {
+				time.Sleep(time.Duration(c.Config.Backoff[modelFull]) * time.Second)
 			}
 			continue
 		}
@@ -433,13 +445,13 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			}
 
 			lastStatusCode = resp.StatusCode
-			if err := c.metricsTracker.RecordErrorCode(modelFull, resp.StatusCode); err != nil {
+			if err := c.MetricsTracker.RecordErrorCode(modelFull, resp.StatusCode); err != nil {
 				slog.Error("Failed to record error code", "error", err)
 			}
 
 			// Check model health after recording the error code
 			slog.Info("🏥 Checking model health after error", "model", modelFull, "status_code", resp.StatusCode)
-			healthy, healthErr := c.metricsTracker.CheckModelOverallHealth(modelFull, c.config)
+			healthy, healthErr := c.MetricsTracker.CheckModelOverallHealth(modelFull, c.Config)
 			if healthErr != nil {
 				slog.Error("❌ Health check failed after error", "model", modelFull, "error", healthErr.Error())
 				return nil, fmt.Errorf("model %s health check failed after error: %w", modelFull, healthErr)
@@ -452,7 +464,7 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				// Record the latency in Redis
-				recErr := c.metricsTracker.RecordLatency(modelFull, elapsed, "success")
+				recErr := c.MetricsTracker.RecordLatency(modelFull, elapsed, "success")
 				if recErr != nil {
 					slog.Error("recording latency", "error", recErr)
 				}
@@ -502,8 +514,8 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 			slog.Error("❌ Request", "failed", lastErr)
 		}
 
-		if attempt < maxRetries-1 && c.config.Backoff[modelFull] > 0 {
-			time.Sleep(time.Duration(c.config.Backoff[modelFull]) * time.Second)
+		if attempt < maxRetries-1 && c.Config.Backoff[modelFull] > 0 {
+			time.Sleep(time.Duration(c.Config.Backoff[modelFull]) * time.Second)
 		}
 	}
 
@@ -568,7 +580,7 @@ func getWeightedModelsList(weights model.WeightedModels) []string {
 }
 
 // combineMessages combines model messages and user messages.
-func combineMessages(modelMessages []model.Message, userMessages []model.Message) ([]model.Message, error) {
+func CombineMessages(modelMessages []model.Message, userMessages []model.Message) ([]model.Message, error) {
 	combinedMessages := make([]model.Message, 0)
 
 	// Find system message from modelMessages if any exists
@@ -673,15 +685,15 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 	case "azure":
 		req.URL.Path = fmt.Sprintf("/openai/deployments/%s/chat/completions", actualModelName)
 		// Use API version from config or fall back to default
-		apiVersion := client.HttpClient.config.AzureAPIVersion
+		apiVersion := client.HttpClient.Config.AzureAPIVersion
 		if apiVersion == "" {
 			apiVersion = "2023-05-15"
 		}
 		req.URL.RawQuery = fmt.Sprintf("api-version=%s", apiVersion)
 
 		// Apply region if specified and exists in AzureRegions map
-		if region != "" && client.HttpClient.config.AzureRegions != nil {
-			if endpoint, ok := client.HttpClient.config.AzureRegions[region]; ok {
+		if region != "" && client.HttpClient.Config.AzureRegions != nil {
+			if endpoint, ok := client.HttpClient.Config.AzureRegions[region]; ok {
 				// Use the endpoint from the AzureRegions map
 				req.URL.Host = strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
 				req.URL.Scheme = "https"
@@ -691,7 +703,7 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 			}
 		}
 	case "vertex":
-		projectID := client.HttpClient.config.VertexProjectID
+		projectID := client.HttpClient.Config.VertexProjectID
 
 		// Check if project ID is valid
 		if projectID == "" {
@@ -702,7 +714,7 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 		slog.Info("🔄 Using project ID for Vertex AI", "project_id", projectID)
 
 		// Use specified region or fall back to config location
-		location := client.HttpClient.config.VertexLocation
+		location := client.HttpClient.Config.VertexLocation
 		if region != "" {
 			location = region
 		}
@@ -800,7 +812,7 @@ func tryNextModel(client *Client, modelFull string, messages []model.Message, ct
 	var nextReq *http.Request
 
 	// Find matching client request
-	for _, clientReq := range client.clients {
+	for _, clientReq := range client.Clients {
 		url := clientReq.URL.String()
 		switch nextProvider {
 		case "vertex":

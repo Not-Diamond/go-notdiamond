@@ -152,7 +152,7 @@ func TestInit(t *testing.T) {
 					return
 				}
 				// Clean up
-				if err := client.HttpClient.metricsTracker.Close(); err != nil {
+				if err := client.HttpClient.MetricsTracker.Close(); err != nil {
 					t.Errorf("Failed to close metrics tracker: %v", err)
 				}
 			}

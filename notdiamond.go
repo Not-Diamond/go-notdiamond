@@ -2,31 +2,19 @@ package notdiamond
 
 import (
 	"log/slog"
-	"net/http"
 	"strings"
 
+	http_client "github.com/Not-Diamond/go-notdiamond/pkg/http/client"
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 	"github.com/Not-Diamond/go-notdiamond/pkg/validation"
 )
 
-type Client struct {
-	clients        []http.Request
-	models         model.Models
-	modelProviders map[string]map[string]bool
-	isOrdered      bool
-	HttpClient     *NotDiamondHttpClient
-}
-
-type contextKey string
-
-const clientKey contextKey = "notdiamondClient"
-
 // ClientKey returns the context key used for storing the NotDiamond client
 func ClientKey() interface{} {
-	return clientKey
+	return http_client.ClientKey
 }
 
-func Init(config model.Config) (*Client, error) {
+func Init(config model.Config) (*http_client.Client, error) {
 	slog.Info("▷ Initializing Client...")
 
 	// Log Vertex AI configuration
@@ -93,15 +81,15 @@ func Init(config model.Config) (*Client, error) {
 			}
 		}
 	}
-	ndHttpClient, err := NewNotDiamondHttpClient(config)
+	ndHttpClient, err := http_client.NewNotDiamondHttpClient(config)
 	if err != nil {
 		return nil, err
 	}
-	client := &Client{
-		clients:        config.Clients,
-		models:         config.Models,
-		modelProviders: modelProviders,
-		isOrdered:      isOrdered,
+	client := &http_client.Client{
+		Clients:        config.Clients,
+		Models:         config.Models,
+		ModelProviders: modelProviders,
+		IsOrdered:      isOrdered,
 		HttpClient:     ndHttpClient,
 	}
 
