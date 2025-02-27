@@ -21,6 +21,7 @@ type Config struct {
 	VertexProjectID  string
 	VertexLocation   string
 	RedisConfig      redis.Config
+	AzureRegions     map[string]string
 }
 
 // LoadConfig loads configuration from environment variables
@@ -56,6 +57,10 @@ func LoadConfig() Config {
 			Password: os.Getenv("REDIS_PASSWORD"),
 			DB:       0, // Default DB
 		},
+		AzureRegions: map[string]string{
+			"eastus":     os.Getenv("AZURE_ENDPOINT"),
+			"westeurope": "https://custom-westeurope.openai.azure.com", // Example endpoint
+		},
 	}
 
 	return cfg
@@ -68,5 +73,11 @@ func GetModelConfig() model.Config {
 	modelConfig.VertexProjectID = cfg.VertexProjectID
 	modelConfig.VertexLocation = cfg.VertexLocation
 	modelConfig.AzureAPIVersion = cfg.AzureAPIVersion
+
+	// Set up Azure regions if not already set
+	if modelConfig.AzureRegions == nil {
+		modelConfig.AzureRegions = cfg.AzureRegions
+	}
+
 	return modelConfig
 }

@@ -14,15 +14,12 @@ var RegionFallbackVertexTest = model.Config{
 	},
 }
 
-// RegionFallbackOpenAITest demonstrates region fallback for OpenAI
-// Note: OpenAI has limited region support (us and eu)
+// RegionFallbackOpenAITest demonstrates model fallback for OpenAI
+// Note: OpenAI no longer supports region fallback
 var RegionFallbackOpenAITest = model.Config{
 	Models: model.OrderedModels{
-		"openai/gpt-4o-mini/eu",   // Try EU region first
-		"openai/gpt-4o-mini/us",   // Try US region first
-		"openai/gpt-3.5-turbo/eu", // Try EU region first
-		"openai/gpt-3.5-turbo/us", // Try US region first
-		"openai/gpt-3.5-turbo",    // Fallback to default region (US)
+		"openai/gpt-4o-mini",   // Try gpt-4o-mini first
+		"openai/gpt-3.5-turbo", // Fallback to gpt-3.5-turbo
 	},
 }
 
@@ -34,17 +31,25 @@ var RegionFallbackAzureTest = model.Config{
 		"azure/gpt-35-turbo/westeurope", // Final fallback to westeurope
 	},
 	AzureAPIVersion: "2023-05-15", // Specify Azure API version
+	AzureRegions: map[string]string{
+		"eastus":     "https://notdiamond-azure-openai.openai.azure.com",
+		"westus":     "https://notdiamond-westus.openai.azure.com",
+		"westeurope": "https://custom-westeurope.openai.azure.com",
+	},
 }
 
 // RegionFallbackMixedTest demonstrates region fallback across different providers
 var RegionFallbackMixedTest = model.Config{
 	Models: model.OrderedModels{
+		"azure/gpt-35-turbo/eastus",  // Fallback to Azure in eastus
+		"vertex/gemini-pro/us-east4", // Try Vertex in us-east4 first
 		"azure/gpt-4o-mini",
-		"azure/gpt-35-turbo/eastus", // Fallback to Azure in eastus
 		"openai/gpt-4o-mini",
-		"vertex/gemini-pro/us-east4",    // Try Vertex in us-east4 first
-		"openai/gpt-3.5-turbo/eu",       // Fallback to OpenAI in EU
-		"vertex/gemini-pro/us-central1", // Final fallback to Vertex in us-central1
+		"openai/gpt-3.5-turbo", // Fallback to OpenAI (no region)
 	},
 	AzureAPIVersion: "2023-05-15", // Specify Azure API version
+	AzureRegions: map[string]string{
+		"eastus":     "https://notdiamond-azure-openai.openai.azure.com",
+		"westeurope": "https://custom-westeurope.openai.azure.com",
+	},
 }

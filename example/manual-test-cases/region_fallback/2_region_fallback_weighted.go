@@ -10,7 +10,7 @@ var RegionFallbackWeightedTest = model.Config{
 		"vertex/gemini-pro/us-east4":    0.3, // 30% chance to try us-east4 first
 		"vertex/gemini-pro/us-west1":    0.3, // 30% chance to try us-west1 first
 		"vertex/gemini-pro/us-central1": 0.2, // 20% chance to try us-central1 first
-		"openai/gpt-3.5-turbo/eu":       0.1, // 10% chance to try OpenAI EU first
+		"openai/gpt-3.5-turbo":          0.1, // 10% chance to try OpenAI first
 		"azure/gpt-35-turbo/eastus":     0.1, // 10% chance to try Azure eastus first
 	},
 	AzureAPIVersion: "2023-05-15", // Specify Azure API version

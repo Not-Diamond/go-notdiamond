@@ -8,7 +8,6 @@ Region fallback allows you to specify multiple regions for a model and automatic
 
 - Improving reliability by having backup regions
 - Handling region-specific outages
-- Optimizing for latency by trying closer regions first
 
 ## Implementation Details
 
@@ -19,15 +18,8 @@ The region fallback feature has been implemented with the following key componen
 2. **Region Prioritization**:
 
    - If a region is specified in the request, that specific region is tried first.
-   - If no region is specified, the system automatically adds region-specific versions of the model to the front of the models list.
 
-3. **URL Transformation**:
-
-   - For Vertex AI: Updates the host to `{region}-aiplatform.googleapis.com` and the path to include the correct region.
-   - For OpenAI: Updates the host to `{region}.api.openai.com` if a region is specified.
-   - For Azure: Updates the host to include the region in the format `{endpoint-name}.{region}.api.cognitive.microsoft.com`.
-
-4. **Fallback Mechanism**:
+3. **Fallback Mechanism**:
    - If a request to a specific region fails, the system automatically tries the next region in the list.
    - Error tracking and health checks are performed for each region.
 
@@ -57,56 +49,12 @@ The region fallback feature has been implemented with the following key componen
 
 ### OpenAI
 
-- Limited region support
-- Regions: `us` (default), `eu`
-- Format: For EU region, the host becomes `api.eu.openai.com`
+- Not supported
 
 ### Azure OpenAI
 
-- Supports all Azure regions where Azure OpenAI is available
-- Common regions: `eastus`, `westus`, `westeurope`, etc.
-- Format: `{endpoint-name}.{region}.api.cognitive.microsoft.com`
+- Defined in AzureRegions map in Config struct
 
 ## Usage
 
 To use these test cases, modify the example application to use one of these configurations:
-
-```go
-import (
-    "github.com/Not-Diamond/go-notdiamond"
-    "github.com/Not-Diamond/go-notdiamond/example/manual-test-cases/region_fallback"
-)
-
-func main() {
-    // Initialize NotDiamond with region fallback configuration
-    client, err := notdiamond.Init(test_region_fallback.RegionFallbackVertexTest)
-    if err != nil {
-        panic(err)
-    }
-
-    // Use the client...
-}
-```
-
-## Testing
-
-The region fallback functionality has been tested with:
-
-1. **Unit Tests**: Testing the ordering logic and URL transformation.
-2. **Integration Tests**: Testing the actual fallback behavior with real API calls.
-
-To run the tests:
-
-```bash
-# Run the unit tests
-go test -v -run TestRegionFallbackOrdering
-
-# Run the integration test (requires API keys)
-go test -v -run TestRegionFallback
-```
-
-## Testing Strategy
-
-1. Test with a non-existent region first to force fallback
-2. Test with a rate-limited region to trigger error-based fallback
-3. Test with a slow region to trigger timeout-based fallback

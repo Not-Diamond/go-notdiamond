@@ -45,6 +45,12 @@ func main() {
 	}
 	modelConfig.RedisConfig = &cfg.RedisConfig
 
+	// Set up Azure regions
+	modelConfig.AzureRegions = map[string]string{
+		"eastus":     cfg.AzureEndpoint,
+		"westeurope": "https://custom-westeurope.openai.azure.com",
+	}
+
 	// Create transport with configuration
 	transport, err := notdiamond.NewTransport(modelConfig)
 	if err != nil {
