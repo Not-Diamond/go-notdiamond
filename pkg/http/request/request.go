@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Not-Diamond/go-notdiamond/pkg/model"
 )
@@ -79,6 +80,9 @@ func ExtractProviderFromRequest(req *http.Request) string {
 		strings.Contains(url, "aiplatform.googleapiss.com") ||
 		strings.Contains(url, "-aiplatform.googleapiss.com") {
 		return "vertex"
+	} else if strings.Contains(url, "bedrock-runtime") ||
+		strings.Contains(url, "amazonaws.com/model") {
+		return "bedrock"
 	}
 
 	// If not found in URL, try to extract from model name in the request body
@@ -113,7 +117,7 @@ func ExtractProviderFromRequest(req *http.Request) string {
 	// If it's in provider/model format or provider/model/region format
 	if len(parts) >= 2 {
 		provider := parts[0]
-		if provider == "vertex" || provider == "azure" || provider == "openai" {
+		if provider == "vertex" || provider == "azure" || provider == "openai" || provider == "bedrock" {
 			return provider
 		}
 	}
@@ -135,6 +139,38 @@ func ExtractMessagesFromRequest(req *http.Request) []model.Message {
 	switch provider {
 	case "vertex":
 		return extractVertexMessages(body)
+	case "bedrock":
+		// For Bedrock, we need to extract from vendor-specific formats
+		// Extract model name to determine the vendor
+		var payload map[string]interface{}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			slog.Error("❌ Failed to unmarshal Bedrock payload", "error", err)
+			return nil
+		}
+
+		// Try to determine vendor from model field
+		modelStr, ok := payload["model"].(string)
+		if !ok {
+			// If no model field, try to infer from payload structure
+			if _, hasPrompt := payload["prompt"]; hasPrompt {
+				// Likely Anthropic format
+				return extractBedrockAnthropicMessages(body)
+			} else if _, hasInputText := payload["inputText"]; hasInputText {
+				// Likely Amazon Titan format
+				return extractBedrockTitanMessages(body)
+			}
+			// Default to OpenAI-like format
+			return extractOpenAIMessages(body)
+		}
+
+		// If model field exists, determine vendor from model name
+		if strings.HasPrefix(modelStr, "anthropic.") || strings.Contains(modelStr, "claude") {
+			return extractBedrockAnthropicMessages(body)
+		} else if strings.HasPrefix(modelStr, "amazon.") || strings.Contains(modelStr, "titan") {
+			return extractBedrockTitanMessages(body)
+		}
+		// Default to OpenAI-like format for unknown model types
+		return extractOpenAIMessages(body)
 	default:
 		return extractOpenAIMessages(body)
 	}
@@ -185,6 +221,92 @@ func extractVertexMessages(body []byte) []model.Message {
 			})
 		}
 	}
+	return messages
+}
+
+// extractBedrockAnthropicMessages extracts messages from Bedrock Anthropic Claude format
+func extractBedrockAnthropicMessages(body []byte) []model.Message {
+	var payload struct {
+		Prompt string `json:"prompt"`
+		System string `json:"system"`
+	}
+
+	err := json.Unmarshal(body, &payload)
+	if err != nil {
+		return nil
+	}
+
+	messages := make([]model.Message, 0)
+
+	// Add system message if present
+	if payload.System != "" {
+		messages = append(messages, model.Message{
+			"role":    "system",
+			"content": payload.System,
+		})
+	}
+
+	// Process the prompt which is in the format "\n\nHuman: ...\n\nAssistant: ..."
+	parts := strings.Split(payload.Prompt, "\n\n")
+	for _, part := range parts {
+		if strings.HasPrefix(part, "Human: ") {
+			content := strings.TrimPrefix(part, "Human: ")
+			messages = append(messages, model.Message{
+				"role":    "user",
+				"content": content,
+			})
+		} else if strings.HasPrefix(part, "Assistant: ") {
+			content := strings.TrimPrefix(part, "Assistant: ")
+			// Skip empty Assistant messages (usually the last one expecting completion)
+			if content != "" {
+				messages = append(messages, model.Message{
+					"role":    "assistant",
+					"content": content,
+				})
+			}
+		}
+	}
+
+	return messages
+}
+
+// extractBedrockTitanMessages extracts messages from Bedrock Amazon Titan format
+func extractBedrockTitanMessages(body []byte) []model.Message {
+	var payload struct {
+		InputText string `json:"inputText"`
+	}
+
+	err := json.Unmarshal(body, &payload)
+	if err != nil {
+		return nil
+	}
+
+	messages := make([]model.Message, 0)
+
+	// Process the input text which is in the format "System: ...\nUser: ...\nAssistant: ..."
+	lines := strings.Split(payload.InputText, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "System: ") {
+			content := strings.TrimPrefix(line, "System: ")
+			messages = append(messages, model.Message{
+				"role":    "system",
+				"content": content,
+			})
+		} else if strings.HasPrefix(line, "User: ") {
+			content := strings.TrimPrefix(line, "User: ")
+			messages = append(messages, model.Message{
+				"role":    "user",
+				"content": content,
+			})
+		} else if strings.HasPrefix(line, "Assistant: ") {
+			content := strings.TrimPrefix(line, "Assistant: ")
+			messages = append(messages, model.Message{
+				"role":    "assistant",
+				"content": content,
+			})
+		}
+	}
+
 	return messages
 }
 
@@ -439,4 +561,101 @@ func TransformFromVertexToOpenAI(body []byte) ([]byte, error) {
 	}
 
 	return result, nil
+}
+
+// TransformFromBedrockResponse transforms a response from Bedrock to OpenAI format
+func TransformFromBedrockResponse(body []byte, modelName string) ([]byte, error) {
+	// Parse the Bedrock response
+	var bedrockResponse map[string]interface{}
+	err := json.Unmarshal(body, &bedrockResponse)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Bedrock response: %w", err)
+	}
+
+	// Determine the model vendor
+	vendor := "anthropic" // Default to anthropic format
+	if strings.Contains(modelName, ".") {
+		vendor = strings.Split(modelName, ".")[0]
+	}
+
+	// Format OpenAI response
+	var openAIResponse map[string]interface{}
+
+	switch vendor {
+	case "anthropic":
+		// Extract completion from Anthropic response
+		completion, ok := bedrockResponse["completion"].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid or missing 'completion' in Anthropic response")
+		}
+
+		// Format as OpenAI response
+		openAIResponse = map[string]interface{}{
+			"id":      fmt.Sprintf("bedrock-%s-%d", modelName, time.Now().Unix()),
+			"object":  "chat.completion",
+			"created": time.Now().Unix(),
+			"model":   modelName,
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": strings.TrimSpace(completion),
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]interface{}{
+				"prompt_tokens":     0, // Bedrock doesn't report token counts in this way
+				"completion_tokens": 0, // We'd need additional processing to estimate these
+				"total_tokens":      0,
+			},
+		}
+
+	case "amazon":
+		// Extract completion from Amazon Titan response
+		results, ok := bedrockResponse["results"].([]interface{})
+		if !ok || len(results) == 0 {
+			return nil, fmt.Errorf("invalid or missing 'results' in Amazon response")
+		}
+
+		resultObj, ok := results[0].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid first result in Amazon response")
+		}
+
+		outputText, ok := resultObj["outputText"].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid or missing 'outputText' in Amazon response")
+		}
+
+		// Format as OpenAI response
+		openAIResponse = map[string]interface{}{
+			"id":      fmt.Sprintf("bedrock-%s-%d", modelName, time.Now().Unix()),
+			"object":  "chat.completion",
+			"created": time.Now().Unix(),
+			"model":   modelName,
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": strings.TrimSpace(outputText),
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]interface{}{
+				"prompt_tokens":     0, // Bedrock doesn't report token counts in this way
+				"completion_tokens": 0, // We'd need additional processing to estimate these
+				"total_tokens":      0,
+			},
+		}
+
+	default:
+		// For unsupported models, return the original response
+		return body, nil
+	}
+
+	return json.Marshal(openAIResponse)
 }

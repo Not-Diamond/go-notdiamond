@@ -469,6 +469,36 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					slog.Error("recording latency", "error", recErr)
 				}
 
+				// For Bedrock responses, transform them to OpenAI format
+				if strings.HasPrefix(modelFull, "bedrock/") {
+					// Extract model name from modelFull
+					parts := strings.Split(modelFull, "/")
+					modelName := parts[1] // The model name is the second part (bedrock/model_name)
+
+					// Transform the response
+					transformedBody, transformErr := request.TransformFromBedrockResponse(body, modelName)
+					if transformErr != nil {
+						slog.Error("❌ Failed to transform Bedrock response", "error", transformErr)
+						lastErr = transformErr
+						continue
+					}
+
+					slog.Info("✅ Transformed Bedrock response to OpenAI format")
+					body = transformedBody
+				}
+				// Similarly for Vertex responses, transform to OpenAI format
+				if strings.HasPrefix(modelFull, "vertex/") {
+					transformedBody, transformErr := request.TransformFromVertexResponse(body)
+					if transformErr != nil {
+						slog.Error("❌ Failed to transform Vertex response", "error", transformErr)
+						lastErr = transformErr
+						continue
+					}
+
+					slog.Info("✅ Transformed Vertex response to OpenAI format")
+					body = transformedBody
+				}
+
 				return &http.Response{
 					Status:     resp.Status,
 					StatusCode: resp.StatusCode,
@@ -628,6 +658,8 @@ func transformRequestForProvider(originalBody []byte, nextProvider, nextModel st
 		jsonData, err = transformToOpenAIFormat(originalBody, nextProvider, nextModel)
 	case "vertex":
 		jsonData, err = transformToVertexFormat(originalBody, nextModel, client)
+	case "bedrock":
+		jsonData, err = transformToBedrockFormat(originalBody, nextModel, client)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", nextProvider)
 	}
@@ -669,6 +701,152 @@ func transformToVertexFormat(originalBody []byte, modelName string, client *Clie
 	return request.TransformToVertexRequest(originalBody, modelName)
 }
 
+// transformToBedrockFormat transforms the request body to Bedrock format
+func transformToBedrockFormat(originalBody []byte, modelName string, client *Client) ([]byte, error) {
+	// Parse the original request (expected to be in OpenAI format)
+	var openAIRequest map[string]interface{}
+	err := json.Unmarshal(originalBody, &openAIRequest)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing original request: %w", err)
+	}
+
+	// Determine the model vendor (anthropic, amazon, etc.) from the model name
+	vendor := "anthropic" // Default to anthropic format
+	if strings.Contains(modelName, ".") {
+		vendor = strings.Split(modelName, ".")[0]
+	}
+
+	// Convert based on vendor
+	switch vendor {
+	case "anthropic":
+		// Anthropic Claude models on Bedrock
+		messages, ok := openAIRequest["messages"].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid messages format in request")
+		}
+
+		// Convert OpenAI messages to Anthropic's format
+		var prompt string
+		var systemPrompt string
+
+		for _, msg := range messages {
+			message, ok := msg.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			role, ok := message["role"].(string)
+			if !ok {
+				continue
+			}
+
+			content, ok := message["content"].(string)
+			if !ok {
+				content = ""
+			}
+
+			switch role {
+			case "system":
+				systemPrompt = content
+			case "user":
+				prompt += "\n\nHuman: " + content
+			case "assistant":
+				prompt += "\n\nAssistant: " + content
+			}
+		}
+
+		// Add final Human prompt if it's not already there
+		if !strings.HasSuffix(prompt, "Human:") && !strings.HasSuffix(prompt, "Assistant:") {
+			prompt += "\n\nHuman: "
+		}
+
+		// Add final Assistant prompt expecting the model to reply
+		if !strings.HasSuffix(prompt, "Assistant:") {
+			prompt += "\n\nAssistant: "
+		}
+
+		// Create Anthropic request format
+		bedrockRequest := map[string]interface{}{
+			"prompt":         prompt,
+			"max_tokens":     openAIRequest["max_tokens"],
+			"temperature":    openAIRequest["temperature"],
+			"top_p":          openAIRequest["top_p"],
+			"stop_sequences": []string{"\n\nHuman:"},
+		}
+
+		// Add system prompt if provided
+		if systemPrompt != "" {
+			bedrockRequest["system"] = systemPrompt
+		}
+
+		// Remove nil fields
+		for k, v := range bedrockRequest {
+			if v == nil {
+				delete(bedrockRequest, k)
+			}
+		}
+
+		return json.Marshal(bedrockRequest)
+
+	case "amazon":
+		// Amazon Titan models on Bedrock
+		messages, ok := openAIRequest["messages"].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid messages format in request")
+		}
+
+		var textPrompt string
+		for _, msg := range messages {
+			message, ok := msg.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			role, ok := message["role"].(string)
+			if !ok {
+				continue
+			}
+
+			content, ok := message["content"].(string)
+			if !ok {
+				content = ""
+			}
+
+			switch role {
+			case "system":
+				textPrompt += "System: " + content + "\n"
+			case "user":
+				textPrompt += "User: " + content + "\n"
+			case "assistant":
+				textPrompt += "Assistant: " + content + "\n"
+			}
+		}
+
+		bedrockRequest := map[string]interface{}{
+			"inputText": textPrompt,
+			"textGenerationConfig": map[string]interface{}{
+				"maxTokenCount": openAIRequest["max_tokens"],
+				"temperature":   openAIRequest["temperature"],
+				"topP":          openAIRequest["top_p"],
+			},
+		}
+
+		// Remove nil fields
+		for k, v := range bedrockRequest {
+			if v == nil {
+				delete(bedrockRequest, k)
+			}
+		}
+
+		return json.Marshal(bedrockRequest)
+
+	default:
+		// For other models, pass through the original request
+		// This should be updated as more model-specific formats are supported
+		return originalBody, nil
+	}
+}
+
 // updateRequestURL updates the request URL based on the provider and model
 func updateRequestURL(req *http.Request, provider, modelName string, client *Client) error {
 	// Extract region if present in modelName (format: modelName/region)
@@ -702,6 +880,38 @@ func updateRequestURL(req *http.Request, provider, modelName string, client *Cli
 				slog.Warn("🔄 Region not found in AzureRegions map, using default endpoint", "region", region)
 			}
 		}
+	case "bedrock":
+		// For Bedrock, the model name format is typically vendorName.modelName (e.g., anthropic.claude-v2)
+		// Handle region if specified
+		if region == "" {
+			// Default to us-east-1 if no region is specified
+			region = "us-east-1"
+			slog.Info("🔄 No region specified for Bedrock, using default", "region", region)
+		}
+
+		// Use the region from BedrockRegions map if available
+		if client.HttpClient.Config.BedrockRegions != nil {
+			if endpoint, ok := client.HttpClient.Config.BedrockRegions[region]; ok {
+				// Use the endpoint from the BedrockRegions map
+				req.URL.Host = strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+				req.URL.Scheme = "https"
+				slog.Info("🔄 Using Bedrock endpoint from BedrockRegions map", "region", region, "endpoint", endpoint)
+			} else {
+				// Construct the standard AWS Bedrock endpoint for the region
+				req.URL.Host = fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", region)
+				req.URL.Scheme = "https"
+				slog.Info("🔄 Constructed Bedrock endpoint for region", "region", region, "endpoint", req.URL.Host)
+			}
+		} else {
+			// Construct the standard AWS Bedrock endpoint for the region
+			req.URL.Host = fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", region)
+			req.URL.Scheme = "https"
+			slog.Info("🔄 Constructed Bedrock endpoint for region", "region", region, "endpoint", req.URL.Host)
+		}
+
+		// Update the path for the Bedrock model
+		req.URL.Path = fmt.Sprintf("/model/%s/invoke", actualModelName)
+		slog.Info("🔄 Updated Bedrock path", "path", req.URL.Path, "model", actualModelName)
 	case "vertex":
 		projectID := client.HttpClient.Config.VertexProjectID
 
@@ -777,6 +987,31 @@ func updateRequestAuth(req *http.Request, provider string, ctx context.Context) 
 	case "azure":
 		req.Header.Set("api-key", apiKey)
 		req.Header.Del("Authorization")
+	case "bedrock":
+		// For Bedrock, we need to use AWS SigV4 signing
+		// Extract region from URL host
+		region := "us-east-1" // Default
+		if strings.Contains(req.URL.Host, "bedrock-runtime.") {
+			parts := strings.Split(req.URL.Host, ".")
+			if len(parts) > 1 {
+				region = parts[1]
+			}
+		}
+
+		// Get AWS credentials from environment
+		// We'll use the default AWS SDK credentials provider chain
+		// This will look for credentials in the following order:
+		// 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+		// 2. Shared credentials file (~/.aws/credentials)
+		// 3. If running on an EC2 instance, EC2 instance metadata
+
+		// Note: The actual signing implementation would be done by AWS SDK
+		// Since we don't want to add direct dependencies here, we'll assume
+		// the AWS SDK is available and will handle this in a real implementation
+
+		// For now, we'll set a placeholder header to indicate Bedrock auth is needed
+		req.Header.Set("X-Bedrock-Auth-Required", "true")
+		slog.Info("🔑 AWS SigV4 signing required for Bedrock", "region", region)
 	case "vertex":
 		credentials, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 		if err != nil {

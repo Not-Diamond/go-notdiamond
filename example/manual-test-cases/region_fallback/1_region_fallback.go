@@ -41,6 +41,7 @@ var RegionFallbackAzureTest = model.Config{
 // RegionFallbackMixedTest demonstrates region fallback across different providers
 var RegionFallbackMixedTest = model.Config{
 	Models: model.OrderedModels{
+		"bedrock/anthropic.claude-3-sonnet-20240229-v1:0/us-west-2",
 		"azure/gpt-35-turbo/eastus",  // Fallback to Azure in eastus
 		"vertex/gemini-pro/us-east4", // Try Vertex in us-east4 first
 		"azure/gpt-4o-mini",
@@ -51,5 +52,9 @@ var RegionFallbackMixedTest = model.Config{
 	AzureRegions: map[string]string{
 		"eastus":     "https://notdiamond-azure-openai.openai.azure.com",
 		"westeurope": "https://custom-westeurope.openai.azure.com",
+	},
+	BedrockRegions: map[string]string{
+		"us-east-1": "https://bedrock-runtime.us-east-1.amazonaws.com",
+		"us-west-2": "https://bedrock-runtime.us-west-2.amazonaws.com",
 	},
 }

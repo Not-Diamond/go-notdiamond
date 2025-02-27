@@ -22,6 +22,11 @@ type Config struct {
 	VertexLocation   string
 	RedisConfig      redis.Config
 	AzureRegions     map[string]string
+	// AWS Bedrock Configuration
+	AWSAccessKeyID     string
+	AWSSecretAccessKey string
+	AWSRegion          string
+	BedrockRegions     map[string]string
 }
 
 // LoadConfig loads configuration from environment variables
@@ -61,6 +66,13 @@ func LoadConfig() Config {
 			"eastus":     os.Getenv("AZURE_ENDPOINT"),
 			"westeurope": "https://custom-westeurope.openai.azure.com", // Example endpoint
 		},
+		AWSAccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+		AWSSecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		AWSRegion:          os.Getenv("AWS_REGION"),
+		BedrockRegions: map[string]string{
+			"us-east-1": "https://bedrock-runtime.us-east-1.amazonaws.com",
+			"us-west-2": "https://bedrock-runtime.us-west-2.amazonaws.com",
+		},
 	}
 
 	return cfg
@@ -77,6 +89,11 @@ func GetModelConfig() model.Config {
 	// Set up Azure regions if not already set
 	if modelConfig.AzureRegions == nil {
 		modelConfig.AzureRegions = cfg.AzureRegions
+	}
+
+	// Set up Bedrock regions
+	if modelConfig.BedrockRegions == nil {
+		modelConfig.BedrockRegions = cfg.BedrockRegions
 	}
 
 	return modelConfig

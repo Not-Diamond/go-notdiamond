@@ -125,7 +125,7 @@ func validateModelName(model string) error {
 // validateProvider validates the provider for the NotDiamond client.
 func validateProvider(provider string) error {
 	switch provider {
-	case string(model.ClientTypeAzure), string(model.ClientTypeOpenai), string(model.ClientTypeVertex):
+	case string(model.ClientTypeAzure), string(model.ClientTypeOpenai), string(model.ClientTypeVertex), string(model.ClientTypeBedrock):
 		return nil
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)
