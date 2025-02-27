@@ -355,8 +355,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 						// Log the updated request URL
 						slog.Info("🔄 Modified request URL for provider switch", "url", newReq.URL.String())
 
-						// Use a raw client for the request
-						rawClient := &http.Client{}
+						// Use a client with the same transport as the original client
+						rawClient := &http.Client{
+							Transport: c.Client.Transport,
+							Timeout:   c.Client.Timeout,
+						}
 						resp, reqErr = rawClient.Do(newReq)
 					} else {
 						reqErr = fmt.Errorf("no client found for provider %s", modelFullProvider)
@@ -386,8 +389,11 @@ func (c *NotDiamondHttpClient) tryWithRetries(modelFull string, req *http.Reques
 					slog.Info("🔑 Updated authentication for Vertex AI")
 				}
 
-				// Use a raw client for the initial request
-				rawClient := &http.Client{}
+				// Use a client with the same transport as the original client
+				rawClient := &http.Client{
+					Transport: c.Client.Transport,
+					Timeout:   c.Client.Timeout,
+				}
 				resp, reqErr = rawClient.Do(req)
 			}
 		} else {

@@ -110,7 +110,6 @@ func TestCombineMessages(t *testing.T) {
 }
 
 func TestTryWithRetries(t *testing.T) {
-	t.Skip("Skipping test due to flakiness")
 	tests := []struct {
 		name           string
 		modelFull      string
@@ -187,10 +186,6 @@ func TestTryWithRetries(t *testing.T) {
 			},
 			setupTransport: func() *mockTransport {
 				return &mockTransport{
-					errors: []error{
-						fmt.Errorf("network error"),
-						fmt.Errorf("network error"),
-					},
 					responses: []*http.Response{
 						nil,
 						nil,
@@ -199,14 +194,10 @@ func TestTryWithRetries(t *testing.T) {
 							Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
 						},
 					},
-					urlResponses: map[string]*http.Response{
-						"api.openai.com": {
-							StatusCode: 200,
-							Body:       io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
-						},
-					},
-					urlErrors: map[string]error{
-						"api.openai.com": fmt.Errorf("network error"),
+					errors: []error{
+						fmt.Errorf("network error"),
+						fmt.Errorf("network error"),
+						nil,
 					},
 				}
 			},
@@ -241,9 +232,6 @@ func TestTryWithRetries(t *testing.T) {
 						fmt.Errorf("persistent error"),
 						fmt.Errorf("persistent error"),
 					},
-					urlErrors: map[string]error{
-						"api.openai.com": fmt.Errorf("persistent error"),
-					},
 				}
 			},
 			expectedCalls: 2,
@@ -273,12 +261,6 @@ func TestTryWithRetries(t *testing.T) {
 				return &mockTransport{
 					responses: []*http.Response{
 						{
-							StatusCode: 429,
-							Body:       io.NopCloser(bytes.NewBufferString(`{"error": "rate limit"}`)),
-						},
-					},
-					urlResponses: map[string]*http.Response{
-						"api.openai.com": {
 							StatusCode: 429,
 							Body:       io.NopCloser(bytes.NewBufferString(`{"error": "rate limit"}`)),
 						},
