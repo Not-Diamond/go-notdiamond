@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Not-Diamond/go-notdiamond"
+	"github.com/Not-Diamond/go-notdiamond/pkg/transport"
 
 	"example/azure"
 	"example/config"
@@ -52,7 +52,7 @@ func main() {
 	}
 
 	// Create transport with configuration
-	transport, err := notdiamond.NewTransport(modelConfig)
+	transport, err := transport.NewTransport(modelConfig)
 	if err != nil {
 		log.Fatalf("Failed to create transport: %v", err)
 	}
