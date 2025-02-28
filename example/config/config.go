@@ -1,7 +1,7 @@
 package config
 
 import (
-	test_ordered "example/manual-test-cases/ordered_models"
+	test_region_fallback "example/manual-test-cases/region_fallback"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,6 +21,12 @@ type Config struct {
 	VertexProjectID  string
 	VertexLocation   string
 	RedisConfig      redis.Config
+	AzureRegions     map[string]string
+	// AWS Bedrock Configuration
+	AWSAccessKeyID     string
+	AWSSecretAccessKey string
+	AWSRegion          string
+	BedrockRegions     map[string]string
 }
 
 // LoadConfig loads configuration from environment variables
@@ -56,6 +62,17 @@ func LoadConfig() Config {
 			Password: os.Getenv("REDIS_PASSWORD"),
 			DB:       0, // Default DB
 		},
+		AzureRegions: map[string]string{
+			"eastus":     os.Getenv("AZURE_ENDPOINT"),
+			"westeurope": "https://custom-westeurope.openai.azure.com", // Example endpoint
+		},
+		AWSAccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+		AWSSecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		AWSRegion:          os.Getenv("AWS_REGION"),
+		BedrockRegions: map[string]string{
+			"us-east-1": "https://bedrock-runtime.us-east-1.amazonaws.com",
+			"us-west-2": "https://bedrock-runtime.us-west-2.amazonaws.com",
+		},
 	}
 
 	return cfg
@@ -64,9 +81,20 @@ func LoadConfig() Config {
 // GetModelConfig returns a model configuration for testing
 func GetModelConfig() model.Config {
 	cfg := LoadConfig()
-	modelConfig := test_ordered.OrderedModels
+	modelConfig := test_region_fallback.RegionFallbackMixedTest
 	modelConfig.VertexProjectID = cfg.VertexProjectID
 	modelConfig.VertexLocation = cfg.VertexLocation
 	modelConfig.AzureAPIVersion = cfg.AzureAPIVersion
+
+	// Set up Azure regions if not already set
+	if modelConfig.AzureRegions == nil {
+		modelConfig.AzureRegions = cfg.AzureRegions
+	}
+
+	// Set up Bedrock regions
+	if modelConfig.BedrockRegions == nil {
+		modelConfig.BedrockRegions = cfg.BedrockRegions
+	}
+
 	return modelConfig
 }

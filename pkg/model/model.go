@@ -29,9 +29,10 @@ func (WeightedModels) isModels() {}
 type clientType string
 
 const (
-	ClientTypeAzure  clientType = "azure"
-	ClientTypeOpenai clientType = "openai"
-	ClientTypeVertex clientType = "vertex"
+	ClientTypeAzure   clientType = "azure"
+	ClientTypeOpenai  clientType = "openai"
+	ClientTypeVertex  clientType = "vertex"
+	ClientTypeBedrock clientType = "bedrock"
 )
 
 // RollingAverageLatency is a type that can be used to represent a rolling average latency.
@@ -84,5 +85,7 @@ type Config struct {
 	RedisConfig        *redis.Config // Redis configuration for metrics tracking
 	VertexProjectID    string
 	VertexLocation     string
-	AzureAPIVersion    string // Azure API version to use for requests
+	AzureAPIVersion    string            // Azure API version to use for requests
+	AzureRegions       map[string]string // Map of region names to Azure endpoints
+	BedrockRegions     map[string]string // Map of region names to AWS Bedrock endpoints
 }
