@@ -726,84 +726,15 @@ func TestStartPeriodicCleanup(t *testing.T) {
 		t.Errorf("Expected 400 error percentage to be 40.0 before cleanup, got %f", errorPercentages[400])
 	}
 
-	// Create a done channel to signal when cleanup has run
-	done := make(chan bool)
-
-	// Create a mock periodic cleanup function that signals when it has run
+	// Use a very short cleanup interval and age of 0 to clean up all data
 	cleanupInterval := 100 * time.Millisecond
 	dataAge := 0 * time.Second // 0 seconds means clean up all data
 
-	// Start periodic cleanup with a custom function that signals when cleanup has occurred
-	go func() {
-		// First ticker run
-		ticker := time.NewTicker(cleanupInterval)
-		defer ticker.Stop()
+	// Start the actual periodic cleanup
+	tracker.StartPeriodicCleanup(cleanupInterval, dataAge)
 
-		select {
-		case <-ticker.C:
-			// Get all known models from Redis latency keys
-			latencyKeys, err := tracker.client.GetKeysWithPrefix(ctx, "latency:*")
-			if err != nil {
-				t.Errorf("Failed to get latency keys for cleanup: %v", err)
-				done <- false
-				return
-			}
-
-			// Extract model names from the latency keys
-			models := make(map[string]bool)
-			for _, key := range latencyKeys {
-				// Parse model name from key format "latency:model"
-				parts := strings.Split(key, ":")
-				if len(parts) >= 2 && parts[0] == "latency" && !strings.Contains(parts[1], "recovery") && !strings.Contains(parts[1], "counter") {
-					models[parts[1]] = true
-				}
-			}
-
-			// Get all known models from Redis error keys
-			errorKeys, err := tracker.client.GetKeysWithPrefix(ctx, "errors:*")
-			if err != nil {
-				t.Errorf("Failed to get error keys for cleanup: %v", err)
-				done <- false
-				return
-			}
-
-			// Extract model names from the error keys
-			for _, key := range errorKeys {
-				// Parse model name from key format "errors:model"
-				parts := strings.Split(key, ":")
-				if len(parts) >= 2 && parts[0] == "errors" && !strings.Contains(parts[1], "recovery") && !strings.Contains(parts[1], "counter") {
-					models[parts[1]] = true
-				}
-			}
-
-			// Clean up data for each model
-			for model := range models {
-				// Clean up old latency data
-				if err := tracker.client.CleanupOldLatencies(ctx, model, dataAge); err != nil {
-					t.Errorf("Failed to clean up old latency data: %v", err)
-					done <- false
-					return
-				}
-
-				// Clean up old error data
-				if err := tracker.client.CleanupOldErrors(ctx, model, dataAge); err != nil {
-					t.Errorf("Failed to clean up old error data: %v", err)
-					done <- false
-					return
-				}
-			}
-
-			done <- true
-		}
-	}()
-
-	// Wait for the cleanup to run or timeout
-	select {
-	case <-done:
-		// Cleanup has run, now check results
-	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for cleanup to run")
-	}
+	// Wait for the cleanup to run
+	time.Sleep(500 * time.Millisecond)
 
 	// Verify data was cleaned up
 	latencyEntries, err = tracker.client.GetLatencyEntries(ctx, modelName, 5)
@@ -821,6 +752,74 @@ func TestStartPeriodicCleanup(t *testing.T) {
 	if len(errorPercentages) != 0 {
 		t.Errorf("Expected empty error percentages after cleanup, got %v", errorPercentages)
 	}
+}
+
+// redisClientWrapper is a wrapper around redis.Client that tracks when cleanup methods are called
+type redisClientWrapper struct {
+	client                 *redis.Client
+	cleanupLatenciesCalled *bool
+	cleanupErrorsCalled    *bool
+}
+
+// CleanupOldLatencies wraps the original method and tracks when it's called
+func (w *redisClientWrapper) CleanupOldLatencies(ctx context.Context, model string, age time.Duration) error {
+	*w.cleanupLatenciesCalled = true
+	return w.client.CleanupOldLatencies(ctx, model, age)
+}
+
+// CleanupOldErrors wraps the original method and tracks when it's called
+func (w *redisClientWrapper) CleanupOldErrors(ctx context.Context, model string, age time.Duration) error {
+	*w.cleanupErrorsCalled = true
+	return w.client.CleanupOldErrors(ctx, model, age)
+}
+
+// Forward all other methods to the underlying client
+func (w *redisClientWrapper) Close() error {
+	return w.client.Close()
+}
+
+func (w *redisClientWrapper) RecordLatency(ctx context.Context, model string, latency float64, status string) error {
+	return w.client.RecordLatency(ctx, model, latency, status)
+}
+
+func (w *redisClientWrapper) SetRecoveryTime(ctx context.Context, model string, duration time.Duration) error {
+	return w.client.SetRecoveryTime(ctx, model, duration)
+}
+
+func (w *redisClientWrapper) CheckRecoveryTime(ctx context.Context, model string) (bool, error) {
+	return w.client.CheckRecoveryTime(ctx, model)
+}
+
+func (w *redisClientWrapper) GetAverageLatency(ctx context.Context, model string, n int64) (float64, error) {
+	return w.client.GetAverageLatency(ctx, model, n)
+}
+
+func (w *redisClientWrapper) GetLatencyEntries(ctx context.Context, model string, n int64) ([]float64, error) {
+	return w.client.GetLatencyEntries(ctx, model, n)
+}
+
+func (w *redisClientWrapper) RecordErrorCode(ctx context.Context, model string, statusCode int) error {
+	return w.client.RecordErrorCode(ctx, model, statusCode)
+}
+
+func (w *redisClientWrapper) GetErrorPercentages(ctx context.Context, model string, n int64) (map[int]float64, error) {
+	return w.client.GetErrorPercentages(ctx, model, n)
+}
+
+func (w *redisClientWrapper) SetErrorRecoveryTime(ctx context.Context, model string, duration time.Duration) error {
+	return w.client.SetErrorRecoveryTime(ctx, model, duration)
+}
+
+func (w *redisClientWrapper) CheckErrorRecoveryTime(ctx context.Context, model string) (bool, error) {
+	return w.client.CheckErrorRecoveryTime(ctx, model)
+}
+
+func (w *redisClientWrapper) ClearAllModelData(ctx context.Context, model string) error {
+	return w.client.ClearAllModelData(ctx, model)
+}
+
+func (w *redisClientWrapper) GetKeysWithPrefix(ctx context.Context, prefix string) ([]string, error) {
+	return w.client.GetKeysWithPrefix(ctx, prefix)
 }
 
 func TestNewTrackerWithEnvironmentConfig(t *testing.T) {
