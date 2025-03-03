@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Not-Diamond/go-notdiamond/pkg/http/response"
 	"github.com/Not-Diamond/go-notdiamond/pkg/transport"
 
 	"example/azure"
 	"example/config"
 	"example/openai"
-	"example/response"
 	"example/vertex"
 )
 

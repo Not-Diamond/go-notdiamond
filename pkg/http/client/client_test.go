@@ -3,6 +3,7 @@ package http_client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -1954,4 +1955,328 @@ func mustNewRequest(method, url string, body io.Reader) *http.Request {
 		panic(err)
 	}
 	return req
+}
+
+func TestTransformToOpenAIFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		modelName  string
+		inputBody  []byte
+		wantOutput map[string]interface{}
+		wantErr    bool
+	}{
+		{
+			name:      "vertex payload should be detected by structure",
+			provider:  "openai",
+			modelName: "gpt-4o-mini",
+			inputBody: []byte(`{
+				"contents": [
+					{
+						"role": "user",
+						"parts": [{"text": "What is the capital of France?"}]
+					}
+				],
+				"generationConfig": {
+					"temperature": 0.7,
+					"maxOutputTokens": 1024
+				}
+			}`),
+			wantOutput: map[string]interface{}{
+				"messages": []interface{}{
+					map[string]interface{}{
+						"role":    "user",
+						"content": "What is the capital of France?",
+					},
+				},
+				"temperature": 0.7,
+				"max_tokens":  float64(1024),
+				"model":       "gpt-4o-mini",
+			},
+			wantErr: false,
+		},
+		{
+			name:      "non-vertex payload should remain unchanged",
+			provider:  "openai",
+			modelName: "gpt-4o-mini",
+			inputBody: []byte(`{
+				"messages": [
+					{"role": "user", "content": "Hello"}
+				],
+				"temperature": 0.8
+			}`),
+			wantOutput: map[string]interface{}{
+				"messages": []interface{}{
+					map[string]interface{}{
+						"role":    "user",
+						"content": "Hello",
+					},
+				},
+				"temperature": 0.8,
+				"model":       "gpt-4o-mini",
+			},
+			wantErr: false,
+		},
+		{
+			name:      "vertex payload for Azure provider should remove model",
+			provider:  "azure",
+			modelName: "gpt-4",
+			inputBody: []byte(`{
+				"contents": [
+					{
+						"role": "user",
+						"parts": [{"text": "What is the capital of France?"}]
+					}
+				]
+			}`),
+			wantOutput: map[string]interface{}{
+				"messages": []interface{}{
+					map[string]interface{}{
+						"role":    "user",
+						"content": "What is the capital of France?",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "invalid JSON should return error",
+			provider:   "openai",
+			modelName:  "gpt-4",
+			inputBody:  []byte(`{invalid json}`),
+			wantOutput: nil,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBytes, err := transformToOpenAIFormat(tt.inputBody, tt.provider, tt.modelName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("transformToOpenAIFormat() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			var got map[string]interface{}
+			if err := json.Unmarshal(gotBytes, &got); err != nil {
+				t.Errorf("Failed to unmarshal result: %v", err)
+				return
+			}
+
+			// Compare the result with the expected output
+			if !reflect.DeepEqual(got, tt.wantOutput) {
+				t.Errorf("transformToOpenAIFormat() = %v, want %v", got, tt.wantOutput)
+			}
+		})
+	}
+}
+
+func TestTransformRequestForProvider(t *testing.T) {
+	tests := []struct {
+		name         string
+		originalBody string
+		nextProvider string
+		nextModel    string
+		setupClient  func() *Client
+		expectError  bool
+		checkResult  func(t *testing.T, result []byte) bool
+	}{
+		{
+			name:         "transform to OpenAI format",
+			originalBody: `{"model":"gemini-pro","contents":[{"role":"user","parts":[{"text":"Hello"}]}]}`,
+			nextProvider: "openai",
+			nextModel:    "gpt-4",
+			setupClient:  func() *Client { return &Client{} },
+			expectError:  false,
+			checkResult: func(t *testing.T, result []byte) bool {
+				var data map[string]interface{}
+				if err := json.Unmarshal(result, &data); err != nil {
+					t.Fatalf("Failed to unmarshal result: %v", err)
+					return false
+				}
+
+				// Check model
+				if model, ok := data["model"].(string); !ok || model != "gpt-4" {
+					t.Errorf("Expected model 'gpt-4', got %v", data["model"])
+					return false
+				}
+
+				// Check messages
+				messages, ok := data["messages"].([]interface{})
+				if !ok || len(messages) != 1 {
+					t.Errorf("Expected 1 message, got %v", data["messages"])
+					return false
+				}
+
+				// Check message content
+				message, ok := messages[0].(map[string]interface{})
+				if !ok {
+					t.Errorf("Message is not an object: %v", messages[0])
+					return false
+				}
+
+				if content, ok := message["content"].(string); !ok || content != "Hello" {
+					t.Errorf("Expected content 'Hello', got %v", message["content"])
+					return false
+				}
+
+				if role, ok := message["role"].(string); !ok || role != "user" {
+					t.Errorf("Expected role 'user', got %v", message["role"])
+					return false
+				}
+
+				return true
+			},
+		},
+		{
+			name:         "transform to Azure format",
+			originalBody: `{"model":"gemini-pro","contents":[{"role":"user","parts":[{"text":"Hello"}]}]}`,
+			nextProvider: "azure",
+			nextModel:    "gpt-4",
+			setupClient:  func() *Client { return &Client{} },
+			expectError:  false,
+			checkResult: func(t *testing.T, result []byte) bool {
+				var data map[string]interface{}
+				if err := json.Unmarshal(result, &data); err != nil {
+					t.Fatalf("Failed to unmarshal result: %v", err)
+					return false
+				}
+
+				// For Azure, the model field is removed from the request body
+				// per the implementation in transformToOpenAIFormat
+				if _, exists := data["model"]; exists {
+					t.Errorf("Expected model field to be removed for Azure, but it exists: %v", data["model"])
+					return false
+				}
+
+				// Check messages
+				messages, ok := data["messages"].([]interface{})
+				if !ok || len(messages) != 1 {
+					t.Errorf("Expected 1 message, got %v", data["messages"])
+					return false
+				}
+
+				// Check message content
+				message, ok := messages[0].(map[string]interface{})
+				if !ok {
+					t.Errorf("Message is not an object: %v", messages[0])
+					return false
+				}
+
+				if content, ok := message["content"].(string); !ok || content != "Hello" {
+					t.Errorf("Expected content 'Hello', got %v", message["content"])
+					return false
+				}
+
+				if role, ok := message["role"].(string); !ok || role != "user" {
+					t.Errorf("Expected role 'user', got %v", message["role"])
+					return false
+				}
+
+				return true
+			},
+		},
+		{
+			name:         "transform to Vertex format",
+			originalBody: `{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`,
+			nextProvider: "vertex",
+			nextModel:    "gemini-pro",
+			setupClient: func() *Client {
+				return &Client{
+					ModelProviders: map[string]map[string]bool{
+						"vertex": {"gemini-pro": true},
+					},
+				}
+			},
+			expectError: false,
+			checkResult: func(t *testing.T, result []byte) bool {
+				var data map[string]interface{}
+				if err := json.Unmarshal(result, &data); err != nil {
+					t.Fatalf("Failed to unmarshal result: %v", err)
+					return false
+				}
+
+				// Check model
+				if model, ok := data["model"].(string); !ok || model != "gemini-pro" {
+					t.Errorf("Expected model 'gemini-pro', got %v", data["model"])
+					return false
+				}
+
+				// Check contents
+				contents, ok := data["contents"].([]interface{})
+				if !ok || len(contents) != 1 {
+					t.Errorf("Expected 1 content, got %v", data["contents"])
+					return false
+				}
+
+				// Check content details
+				content, ok := contents[0].(map[string]interface{})
+				if !ok {
+					t.Errorf("Content is not an object: %v", contents[0])
+					return false
+				}
+
+				if role, ok := content["role"].(string); !ok || role != "user" {
+					t.Errorf("Expected role 'user', got %v", content["role"])
+					return false
+				}
+
+				parts, ok := content["parts"].([]interface{})
+				if !ok || len(parts) != 1 {
+					t.Errorf("Expected 1 part, got %v", content["parts"])
+					return false
+				}
+
+				part, ok := parts[0].(map[string]interface{})
+				if !ok {
+					t.Errorf("Part is not an object: %v", parts[0])
+					return false
+				}
+
+				if text, ok := part["text"].(string); !ok || text != "Hello" {
+					t.Errorf("Expected text 'Hello', got %v", part["text"])
+					return false
+				}
+
+				// The output may contain additional fields like generationConfig, which is fine
+
+				return true
+			},
+		},
+		{
+			name:         "unsupported provider",
+			originalBody: `{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`,
+			nextProvider: "unsupported",
+			nextModel:    "some-model",
+			setupClient:  func() *Client { return &Client{} },
+			expectError:  true,
+			checkResult:  func(t *testing.T, result []byte) bool { return true },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := tt.setupClient()
+			result, err := transformRequestForProvider([]byte(tt.originalBody), tt.nextProvider, tt.nextModel, client)
+
+			// Check error expectation
+			if (err != nil) != tt.expectError {
+				t.Errorf("transformRequestForProvider() error = %v, expectError %v", err, tt.expectError)
+				return
+			}
+
+			if err != nil {
+				return
+			}
+
+			// Use the custom check function to validate the result
+			if !tt.checkResult(t, result) {
+				t.Errorf("transformRequestForProvider() produced unexpected result: %s", string(result))
+			}
+		})
+	}
 }
