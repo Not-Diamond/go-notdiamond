@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -698,5 +700,75 @@ func TestClearAllModelData(t *testing.T) {
 		if mr.Exists(key) {
 			t.Errorf("Key %s still exists after ClearAllModelData", key)
 		}
+	}
+}
+
+func TestGetKeysWithPrefix(t *testing.T) {
+	client, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// Set up some test keys
+	testKeys := map[string]string{
+		"prefix:key1":     "value1",
+		"prefix:key2":     "value2",
+		"prefix:subkey:1": "subvalue1",
+		"different:key":   "othervalue",
+		"another:key":     "anothervalue",
+	}
+
+	// Add test keys to Redis
+	for k, v := range testKeys {
+		if err := client.rdb.Set(ctx, k, v, 0).Err(); err != nil {
+			t.Fatalf("Failed to set up test key %s: %v", k, err)
+		}
+	}
+
+	// Test getting keys with prefix
+	tests := []struct {
+		name   string
+		prefix string
+		want   []string
+	}{
+		{
+			name:   "get all prefix keys",
+			prefix: "prefix:*",
+			want:   []string{"prefix:key1", "prefix:key2", "prefix:subkey:1"},
+		},
+		{
+			name:   "get specific subprefix keys",
+			prefix: "prefix:subkey:*",
+			want:   []string{"prefix:subkey:1"},
+		},
+		{
+			name:   "get different keys",
+			prefix: "different:*",
+			want:   []string{"different:key"},
+		},
+		{
+			name:   "get non-existent prefix",
+			prefix: "nonexistent:*",
+			want:   []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := client.GetKeysWithPrefix(ctx, tt.prefix)
+			if err != nil {
+				t.Errorf("GetKeysWithPrefix() error = %v", err)
+				return
+			}
+
+			// Sort both slices for comparison since Redis doesn't guarantee order
+			sort.Strings(got)
+			sort.Strings(tt.want)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetKeysWithPrefix() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

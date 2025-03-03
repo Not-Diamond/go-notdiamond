@@ -41,7 +41,7 @@ var RegionFallbackAzureTest = model.Config{
 // RegionFallbackMixedTest demonstrates region fallback across different providers
 var RegionFallbackMixedTest = model.Config{
 	Models: model.OrderedModels{
-		"azure/gpt-35-turbo/eastus",  // Fallback to Azure in eastus
+		"azure/gpt-4o-mini/eastus",   // Fallback to Azure in eastus
 		"vertex/gemini-pro/us-east4", // Try Vertex in us-east4 first
 		"azure/gpt-4o-mini",
 		"openai/gpt-4o-mini",

@@ -639,8 +639,25 @@ func transformRequestForProvider(originalBody []byte, nextProvider, nextModel st
 func transformToOpenAIFormat(originalBody []byte, provider, modelName string) ([]byte, error) {
 	var payload map[string]interface{}
 
-	// If coming from Vertex, transform to OpenAI format first
-	if bytes.Contains(originalBody, []byte("aiplatform.googleapis.com")) {
+	// Determine if the original payload is from Vertex AI by examining its structure
+	var vertexCheck struct {
+		Contents []struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"contents"`
+	}
+
+	isVertex := false
+	if err := json.Unmarshal(originalBody, &vertexCheck); err == nil {
+		if len(vertexCheck.Contents) > 0 {
+			isVertex = true
+		}
+	}
+
+	// If coming from Vertex, transform to OpenAI format
+	if isVertex {
 		transformed, err := request.TransformFromVertexToOpenAI(originalBody)
 		if err != nil {
 			return nil, err
