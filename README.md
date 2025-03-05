@@ -234,6 +234,52 @@ config := notdiamond.Config{
 }
 ```
 
+### Redis Data Management
+
+The SDK uses Redis to store metrics for model performance tracking, including latency and error rates. To prevent Redis from accumulating excessive data over time, the following data management features are available:
+
+#### Automatic Cleanup
+
+1. When a model exits a recovery period (due to latency or errors), old data is automatically cleaned up
+2. A periodic background cleanup process can run at configurable intervals
+
+Configure Redis data management through environment variables:
+
+```
+# Redis Data Cleanup Configuration
+ENABLE_REDIS_PERIODIC_CLEANUP=true    # Enable/disable periodic background cleanup
+REDIS_CLEANUP_INTERVAL=6h             # How often to run cleanup (accepts Go duration format)
+REDIS_DATA_RETENTION=24h              # How long to keep data before cleanup
+```
+
+Or add these to your `.env` file:
+
+```
+# Redis Configuration
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
+REDIS_DB=0
+# Redis Data Cleanup Configuration
+ENABLE_REDIS_PERIODIC_CLEANUP=true
+REDIS_CLEANUP_INTERVAL=6h
+REDIS_DATA_RETENTION=24h
+```
+
+The periodic cleanup process:
+
+- Runs in a separate goroutine to avoid impacting application performance
+- Identifies all models with data in Redis
+- Removes data older than the specified retention period
+- Logs cleanup activities for monitoring
+
+#### Data Retention Policy
+
+By default, the SDK retains 24 hours of data for both latency and error tracking. This allows for:
+
+- Sufficient historical data for performance analysis
+- Trend detection for model reliability
+- Prevention of Redis memory growth in high-traffic scenarios
+
 ## Error Rate Fallback
 
 Configure custom error rate thresholds and recovery time for each model, with different thresholds for different status codes:
@@ -283,3 +329,106 @@ This allows for fine-grained control over error handling:
 - Configure different number of calls and recovery times per status code
 - Track any HTTP status code you want to monitor
 - Configure different thresholds for different models based on their reliability
+
+## Multi-Region Support
+
+The SDK supports configuring multiple regions for Azure and Vertex AI to improve reliability and reduce latency. This allows you to:
+
+1. Fallback to different regions if one region experiences issues
+2. Load balance requests across multiple regions
+3. Configure region-specific settings for optimal performance
+
+### Model Naming Convention
+
+For region-specific models, use the format `provider/model/region`:
+- Azure: `azure/gpt-4o-mini/eastus`
+- Vertex AI: `vertex/gemini-pro/us-central1`
+
+### Azure Multi-Region Configuration
+
+Azure requires explicit configuration of region endpoints in the `AzureRegions` map:
+
+```go
+config := model.Config{
+	// ... other config ...
+	Models: model.OrderedModels{
+		"azure/gpt-4o-mini/eastus",
+		"azure/gpt-4o-mini/westeurope",
+		"vertex/gemini-pro/us-central1",
+	},
+	AzureAPIVersion: "2023-05-15", // Required for Azure
+	AzureRegions: map[string]string{
+		"eastus":     "https://eastus.api.cognitive.microsoft.com",
+		"westeurope": "https://westeurope.api.cognitive.microsoft.com",
+	},
+}
+```
+
+### Vertex AI Multi-Region Configuration
+
+Vertex AI uses the region directly in the API endpoint and doesn't require additional configuration:
+
+```go
+config := model.Config{
+	// ... other config ...
+	Models: model.OrderedModels{
+		"vertex/gemini-pro/us-central1",
+		"vertex/gemini-pro/us-west1",
+		"vertex/gemini-pro/europe-west4",
+		"azure/gpt-4o-mini/eastus",
+	},
+	VertexProjectID: "your-project-id", // Required for Vertex AI
+	VertexLocation: "us-central1",      // Default location if not specified in model name
+}
+```
+
+### Mixed Provider Configuration with Regions
+
+You can combine providers and regions for comprehensive fallback strategies:
+
+```go
+config := model.Config{
+	// ... other config ...
+	Models: model.OrderedModels{
+		"vertex/gemini-pro/us-east4",    // Try Vertex in us-east4 first
+		"azure/gpt-4o-mini/eastus",      // Then try Azure in eastus
+		"vertex/gemini-pro/us-central1", // Then try Vertex in us-central1
+		"azure/gpt-4o-mini/westeurope",  // Then try Azure in westeurope
+	},
+	AzureAPIVersion: "2023-05-15",
+	AzureRegions: map[string]string{
+		"eastus":     "https://eastus.api.cognitive.microsoft.com",
+		"westeurope": "https://westeurope.api.cognitive.microsoft.com",
+	},
+	VertexProjectID: "your-project-id",
+}
+```
+
+### Region-Specific Settings
+
+You can configure different settings for each region-specific model:
+
+```go
+config := model.Config{
+	// ... other config ...
+	MaxRetries: map[string]int{
+		"azure/gpt-4o-mini/eastus": 3,
+		"azure/gpt-4o-mini/westeurope": 2,
+		"vertex/gemini-pro/us-central1": 2,
+	},
+	Timeout: map[string]float64{
+		"azure/gpt-4o-mini/eastus": 10.0,
+		"azure/gpt-4o-mini/westeurope": 15.0,
+		"vertex/gemini-pro/us-central1": 12.0,
+	},
+}
+```
+
+## Parser
+
+The parser is a function that parses the response from the API and returns the response in a structured format.
+
+```go
+// Import from https://github.com/Not-Diamond/go-notdiamond/pkg/http/response
+result, err := response.Parse(body, startTime)
+```
