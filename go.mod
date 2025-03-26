@@ -5,7 +5,7 @@ go 1.23.5
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/pkg/errors v0.9.1
-	github.com/redis/go-redis/v9 v9.5.1
+	github.com/redis/go-redis/v9 v9.5.5
 	golang.org/x/oauth2 v0.26.0
 )
 
